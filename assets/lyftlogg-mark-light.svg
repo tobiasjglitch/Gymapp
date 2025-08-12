@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Lyftlogg Mark</title>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="96" y1="288" x2="416" y2="288" stroke-width="40"/>
+    <line x1="176" y1="224" x2="176" y2="352" stroke-width="28"/>
+    <line x1="336" y1="224" x2="336" y2="352" stroke-width="28"/>
+    <line x1="256" y1="288" x2="256" y2="408" stroke-width="28"/>
+  </g>
+  <g fill="#FFFFFF">
+    <polygon points="256,88 196,188 316,188" />
+  </g>
+</svg>
