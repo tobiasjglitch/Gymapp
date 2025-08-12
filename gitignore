@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Venv
+venv/
+.venv/
+
+# Lokala streamlit-hemligheter
+.streamlit/secrets.toml
+streamlit_config/secrets.toml
