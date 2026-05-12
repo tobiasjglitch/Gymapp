@@ -14,9 +14,42 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          test -n "$SUPABASE_URL"
-          test -n "$SUPABASE_ANON_KEY"
-          curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/exercises?select=id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+          python - <<'PY'
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          url = os.environ.get("SUPABASE_URL", "").strip().strip('"').strip("'").rstrip("/")
+          key = os.environ.get("SUPABASE_ANON_KEY", "").strip().strip('"').strip("'")
+
+          if not url:
+              print("SUPABASE_URL saknas i GitHub Secrets.")
+              sys.exit(1)
+          if not key:
+              print("SUPABASE_ANON_KEY saknas i GitHub Secrets.")
+              sys.exit(1)
+          if not url.startswith("https://"):
+              print("SUPABASE_URL ska börja med https://")
+              sys.exit(1)
+
+          request = urllib.request.Request(
+              f"{url}/rest/v1/exercises?select=id&limit=1",
+              headers={
+                  "apikey": key,
+                  "Authorization": f"Bearer {key}",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  print(f"Supabase svarade OK: HTTP {response.status}")
+                  print(response.read(200).decode("utf-8", "replace"))
+          except urllib.error.HTTPError as exc:
+              print(f"Supabase svarade med fel: HTTP {exc.code}")
+              print(exc.read(500).decode("utf-8", "replace"))
+              sys.exit(1)
+          except Exception as exc:
+              print(f"Kunde inte nå Supabase: {exc}")
+              sys.exit(1)
+          PY
