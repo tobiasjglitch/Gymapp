@@ -34,10 +34,13 @@ jobs:
               sys.exit(1)
 
           request = urllib.request.Request(
-              f"{url}/rest/v1/exercises?select=id&limit=1",
+              f"{url}/rest/v1/rpc/keepalive",
+              data=b"{}",
+              method="POST",
               headers={
                   "apikey": key,
                   "Authorization": f"Bearer {key}",
+                  "Content-Type": "application/json",
               },
           )
 
