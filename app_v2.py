@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -71,6 +72,8 @@ class ProgramExercise:
     sets: int
     rep_min: int
     rep_max: int
+    start_weight_kg: float | None = None
+    start_reps: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -211,6 +214,8 @@ def _migrate_local_program_profiles(conn: sqlite3.Connection, default_profile_id
             sets INTEGER NOT NULL,
             rep_min INTEGER NOT NULL,
             rep_max INTEGER NOT NULL,
+            start_weight_kg REAL,
+            start_reps TEXT,
             active INTEGER NOT NULL DEFAULT 1,
             UNIQUE(profile_id, day_name, exercise_id)
         )
@@ -266,6 +271,8 @@ def init_db() -> None:
                 sets INTEGER NOT NULL,
                 rep_min INTEGER NOT NULL,
                 rep_max INTEGER NOT NULL,
+                start_weight_kg REAL,
+                start_reps TEXT,
                 active INTEGER NOT NULL DEFAULT 1
             );
 
@@ -301,6 +308,10 @@ def init_db() -> None:
             default_id = default["id"]
 
         _migrate_local_program_profiles(conn, int(default_id))
+        if not _sqlite_column_exists(conn, "program_exercises", "start_weight_kg"):
+            conn.execute("ALTER TABLE program_exercises ADD COLUMN start_weight_kg REAL")
+        if not _sqlite_column_exists(conn, "program_exercises", "start_reps"):
+            conn.execute("ALTER TABLE program_exercises ADD COLUMN start_reps TEXT")
         if not _sqlite_column_exists(conn, "workouts", "profile_id"):
             conn.execute("ALTER TABLE workouts ADD COLUMN profile_id INTEGER REFERENCES profiles(id)")
         conn.execute("UPDATE workouts SET profile_id = ? WHERE profile_id IS NULL", (default_id,))
@@ -420,7 +431,7 @@ def list_program(profile_id: int, day_name: str) -> list[ProgramExercise]:
         rows = (
             supabase_client()
             .table("program_exercises")
-            .select("id,exercise_id,day_name,sort_order,sets,rep_min,rep_max,exercises(name)")
+            .select("id,exercise_id,day_name,sort_order,sets,rep_min,rep_max,start_weight_kg,start_reps,exercises(name)")
             .eq("profile_id", profile_id)
             .eq("day_name", day_name)
             .eq("active", True)
@@ -439,6 +450,8 @@ def list_program(profile_id: int, day_name: str) -> list[ProgramExercise]:
                 sets=int(row["sets"]),
                 rep_min=int(row["rep_min"]),
                 rep_max=int(row["rep_max"]),
+                start_weight_kg=float(row["start_weight_kg"]) if row.get("start_weight_kg") is not None else None,
+                start_reps=tuple(int(value) for value in (row.get("start_reps") or [])),
             )
             for row in rows
         ]
@@ -447,7 +460,7 @@ def list_program(profile_id: int, day_name: str) -> list[ProgramExercise]:
         rows = conn.execute(
             """
             SELECT pe.id, pe.exercise_id, e.name, pe.day_name, pe.sort_order,
-                   pe.sets, pe.rep_min, pe.rep_max
+                   pe.sets, pe.rep_min, pe.rep_max, pe.start_weight_kg, pe.start_reps
             FROM program_exercises pe
             JOIN exercises e ON e.id = pe.exercise_id
             WHERE pe.profile_id = ? AND pe.day_name = ? AND pe.active = 1
@@ -455,7 +468,21 @@ def list_program(profile_id: int, day_name: str) -> list[ProgramExercise]:
             """,
             (profile_id, day_name),
         ).fetchall()
-    return [ProgramExercise(**dict(row)) for row in rows]
+    return [
+        ProgramExercise(
+            id=int(row["id"]),
+            exercise_id=int(row["exercise_id"]),
+            name=row["name"],
+            day_name=row["day_name"],
+            sort_order=int(row["sort_order"]),
+            sets=int(row["sets"]),
+            rep_min=int(row["rep_min"]),
+            rep_max=int(row["rep_max"]),
+            start_weight_kg=float(row["start_weight_kg"]) if row["start_weight_kg"] is not None else None,
+            start_reps=tuple(int(value) for value in json.loads(row["start_reps"] or "[]")),
+        )
+        for row in rows
+    ]
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -562,6 +589,12 @@ def weight_step_for(name: str) -> float:
 def suggest_weight(exercise: ProgramExercise, history: pd.DataFrame) -> WeightSuggestion:
     rows = history[history["exercise_id"].astype(str) == str(exercise.exercise_id)] if not history.empty else history
     if rows.empty:
+        if exercise.start_weight_kg is not None:
+            return WeightSuggestion(
+                exercise.start_weight_kg,
+                f"Börja på {exercise.start_weight_kg:g} kg",
+                "Startvärde från din tidigare träningslogg.",
+            )
         return WeightSuggestion(0.0, "Välj startvikt", "Första gången du loggar övningen.")
 
     rows = rows.sort_values(["datum", "workout_id", "set_nr"])
@@ -580,6 +613,17 @@ def suggest_weight(exercise: ProgramExercise, history: pd.DataFrame) -> WeightSu
         suggested = max(0.0, last_weight - step)
         return WeightSuggestion(suggested, f"Sänk till {suggested:g} kg", "Alla set låg under repmålet senast.")
     return WeightSuggestion(last_weight, f"Behåll {last_weight:g} kg", f"Senast: {', '.join(map(str, reps))} reps.")
+
+
+def suggested_reps(exercise: ProgramExercise, history: pd.DataFrame) -> list[int]:
+    rows = history[history["exercise_id"].astype(str) == str(exercise.exercise_id)] if not history.empty else history
+    if rows.empty:
+        values = list(exercise.start_reps)
+    else:
+        rows = rows.sort_values(["datum", "workout_id", "set_nr"])
+        latest_workout = rows.iloc[-1]["workout_id"]
+        values = [int(value) for value in rows[rows["workout_id"] == latest_workout]["reps"].tolist()]
+    return (values + [exercise.rep_min] * exercise.sets)[: exercise.sets]
 
 
 def _pr_flags(exercise_id: int, weight: float, reps: list[int], history: pd.DataFrame) -> list[bool]:
@@ -880,7 +924,6 @@ def render_today(profile: Profile) -> None:
     default_day = suggested_day(profile.id)
     key = f"selected_day_{profile.id}"
     selected_day = st.selectbox("Pass", DAY_NAMES, index=DAY_NAMES.index(st.session_state.get(key, default_day)), key=key)
-    workout_date = st.date_input("Datum", value=date.today(), key=f"date_{profile.id}")
     plan = list_program(profile.id, selected_day)
     history = history_dataframe(profile.id)
     if not plan:
@@ -889,10 +932,13 @@ def render_today(profile: Profile) -> None:
 
     logged: list[dict] = []
     with st.form(f"log_workout_{profile.id}_{selected_day}"):
-        notes = st.text_area("Anteckning", placeholder="Valfritt, t.ex. sömn, energi eller skada.")
+        with st.expander("Datum och anteckning"):
+            workout_date = st.date_input("Datum", value=date.today(), key=f"date_{profile.id}")
+            notes = st.text_area("Anteckning", placeholder="Valfritt, t.ex. sömn, energi eller skada.")
         for exercise in plan:
             pb = best_for_exercise(exercise.name, history)
             suggestion = suggest_weight(exercise, history)
+            rep_defaults = suggested_reps(exercise, history)
             with st.container(border=True):
                 hint = f"{exercise.sets} set · {exercise.rep_min}-{exercise.rep_max} reps"
                 if pb:
@@ -911,7 +957,7 @@ def render_today(profile: Profile) -> None:
                 columns = st.columns(min(exercise.sets, 4))
                 for set_index in range(1, exercise.sets + 1):
                     with columns[(set_index - 1) % len(columns)]:
-                        reps.append(st.number_input(f"Set {set_index}", min_value=0, max_value=100, value=exercise.rep_min, step=1, key=f"reps_{profile.id}_{exercise.id}_{set_index}"))
+                        reps.append(st.number_input(f"Set {set_index}", min_value=0, max_value=100, value=rep_defaults[set_index - 1], step=1, key=f"reps_{profile.id}_{exercise.id}_{set_index}"))
             if done:
                 logged.append({"exercise_id": exercise.exercise_id, "name": exercise.name, "weight_kg": float(weight), "reps": reps})
         submitted = st.form_submit_button("Spara pass", use_container_width=True, type="primary")
@@ -1070,7 +1116,7 @@ def main() -> None:
         profile = create_profile("Tobias")
         profiles = [profile]
 
-    st.markdown("<div class='hero'><div class='eyebrow'>Gymapp v3</div><div class='title'>Lyftlogg</div></div>", unsafe_allow_html=True)
+    st.markdown("<div class='hero'><div class='title'>Lyftlogg</div></div>", unsafe_allow_html=True)
 
     profile_ids = [profile.id for profile in profiles]
     selected_id = st.session_state.get("profile_id", profile_ids[0])
