@@ -857,7 +857,8 @@ def page_styles() -> None:
         .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.25rem; border-radius:8px; font-weight:800; border:1px solid rgba(17,17,17,.12); }
         [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] { background:#111!important; color:white!important; }
         div[role="radiogroup"] { gap:.35rem; flex-wrap:wrap; }
-        div[role="radiogroup"] label { border:1px solid rgba(17,17,17,.10); border-radius:999px; padding:.18rem .55rem; background:white; }
+        div[role="radiogroup"] label { border:1px solid rgba(17,17,17,.14); border-radius:999px; padding:.18rem .55rem; background:white; color:#111!important; opacity:1!important; }
+        div[role="radiogroup"] label span,div[role="radiogroup"] label p { color:#111!important; opacity:1!important; }
         label,.stTextInput label,.stNumberInput label,.stTextArea label,.stSelectbox label { font-weight:700!important; color:#343841!important; }
         [data-testid="stCheckbox"] label,[data-testid="stCheckbox"] label span,[data-testid="stCheckbox"] p { color:#111!important; opacity:1!important; font-weight:800!important; }
         input,textarea { border-radius:8px!important; background:#fff!important; color:#111!important; caret-color:#111!important; }
