@@ -980,7 +980,7 @@ def render_today(profile: Profile) -> None:
                 hint += f" · PB {pb[0]:g} kg x {pb[1]}"
             if demo_path:
                 title_col, demo_col = st.columns(
-                    [10, 1],
+                    [5, 1],
                     gap="small",
                     vertical_alignment="top",
                 )
@@ -997,7 +997,6 @@ def render_today(profile: Profile) -> None:
                         "▶",
                         key=f"technique_{profile.id}_{exercise.id}",
                         help="Visa utförande",
-                        use_container_width=True,
                     )
                 if show_demo:
                     render_technique_dialog(exercise.name)
