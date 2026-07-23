@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 try:
     from supabase import Client, create_client
@@ -24,6 +25,11 @@ APP_DIR = Path(__file__).parent
 DB_PATH = APP_DIR / "gymapp.db"
 DAY_NAMES = ["Pass 1", "Pass 2", "Pass 3", "Pass 4"]
 VIEWS = ["Idag", "Program", "PB", "Trend", "Historik", "Profiler", "Export"]
+TECHNIQUE_DEMOS = {
+    "lat pulldown": "lat_pulldown.html",
+    "lat pull down": "lat_pulldown.html",
+    "latsdrag": "lat_pulldown.html",
+}
 
 STARTER_PROGRAM = {
     "Pass 1": [
@@ -858,6 +864,31 @@ def trend_dataframe(exercise_name: str, history: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def technique_demo_path(exercise_name: str) -> Path | None:
+    normalized_name = " ".join(exercise_name.strip().split()).casefold()
+    filename = TECHNIQUE_DEMOS.get(normalized_name)
+    if not filename:
+        return None
+    path = APP_DIR / "assets" / "demos" / filename
+    return path if path.exists() else None
+
+
+dialog_decorator = getattr(st, "dialog", None) or st.experimental_dialog
+
+
+@dialog_decorator("Utförande", width="large")
+def render_technique_dialog(exercise_name: str) -> None:
+    path = technique_demo_path(exercise_name)
+    if not path:
+        st.error("Det finns ingen animation för övningen ännu.")
+        return
+    st.markdown(
+        f"<div class='technique-dialog-title'>{escape(exercise_name)}</div>",
+        unsafe_allow_html=True,
+    )
+    components.html(path.read_text(encoding="utf-8"), height=460, scrolling=False)
+
+
 def page_styles() -> None:
     st.markdown(
         """
@@ -896,7 +927,7 @@ def page_styles() -> None:
         .exercise-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.8rem; margin-bottom:.35rem; }
         .exercise-title { font-weight:800; font-size:1.12rem; line-height:1.15; }
         .hint { color:var(--muted); font-size:.88rem; margin-top:.16rem; }
-        .chip { white-space:nowrap; border:1px solid rgba(192,147,66,.35); background:rgba(192,147,66,.11); color:#77531c; border-radius:999px; padding:.22rem .54rem; font-size:.74rem; font-weight:800; }
+        .technique-dialog-title { color:var(--ink); font-size:1.08rem; font-weight:800; margin-bottom:.35rem; }
         div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:8px; border-color:rgba(17,17,17,.10); box-shadow:0 14px 34px rgba(17,17,17,.055); background:rgba(255,255,255,.9); }
         .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.25rem; border-radius:8px; font-weight:800; border:1px solid rgba(17,17,17,.12); }
         [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] { background:#111!important; color:white!important; }
@@ -931,36 +962,74 @@ def render_today(profile: Profile) -> None:
         return
 
     logged: list[dict] = []
-    with st.form(f"log_workout_{profile.id}_{selected_day}"):
-        with st.expander("Datum och anteckning"):
-            workout_date = st.date_input("Datum", value=date.today(), key=f"date_{profile.id}")
-            notes = st.text_area("Anteckning", placeholder="Valfritt, t.ex. sömn, energi eller skada.")
-        for exercise in plan:
-            pb = best_for_exercise(exercise.name, history)
-            suggestion = suggest_weight(exercise, history)
-            rep_defaults = suggested_reps(exercise, history)
-            with st.container(border=True):
-                hint = f"{exercise.sets} set · {exercise.rep_min}-{exercise.rep_max} reps"
-                if pb:
-                    hint += f" · PB {pb[0]:g} kg x {pb[1]}"
+    with st.expander("Datum och anteckning"):
+        workout_date = st.date_input("Datum", value=date.today(), key=f"date_{profile.id}")
+        notes = st.text_area(
+            "Anteckning",
+            placeholder="Valfritt, t.ex. sömn, energi eller skada.",
+            key=f"notes_{profile.id}_{selected_day}",
+        )
+    for exercise in plan:
+        pb = best_for_exercise(exercise.name, history)
+        suggestion = suggest_weight(exercise, history)
+        rep_defaults = suggested_reps(exercise, history)
+        demo_path = technique_demo_path(exercise.name)
+        with st.container(border=True):
+            hint = f"{exercise.sets} set · {exercise.rep_min}-{exercise.rep_max} reps"
+            if pb:
+                hint += f" · PB {pb[0]:g} kg x {pb[1]}"
+            if demo_path:
+                title_col, demo_col = st.columns(
+                    [10, 1],
+                    gap="small",
+                    vertical_alignment="top",
+                )
+                with title_col:
+                    st.markdown(
+                        f"""
+                        <div class="exercise-head"><div><div class="exercise-title">{escape(exercise.name)}</div>
+                        <div class="hint">{escape(hint)}</div></div></div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with demo_col:
+                    show_demo = st.button(
+                        "▶",
+                        key=f"technique_{profile.id}_{exercise.id}",
+                        help="Visa utförande",
+                        use_container_width=True,
+                    )
+                if show_demo:
+                    render_technique_dialog(exercise.name)
+            else:
                 st.markdown(
                     f"""
                     <div class="exercise-head"><div><div class="exercise-title">{escape(exercise.name)}</div>
-                    <div class="hint">{escape(hint)}</div></div><div class="chip">Mål</div></div>
-                    <div class="suggestion"><strong>{escape(suggestion.label)}</strong><span>{escape(suggestion.reason)}</span></div>
+                    <div class="hint">{escape(hint)}</div></div></div>
                     """,
                     unsafe_allow_html=True,
                 )
-                done = st.checkbox("Klar", key=f"done_{profile.id}_{exercise.id}")
-                weight = st.number_input("Vikt kg", min_value=0.0, max_value=500.0, value=float(suggestion.weight), step=0.5, key=f"weight_{profile.id}_{exercise.id}")
-                reps: list[int] = []
-                columns = st.columns(min(exercise.sets, 4))
-                for set_index in range(1, exercise.sets + 1):
-                    with columns[(set_index - 1) % len(columns)]:
-                        reps.append(st.number_input(f"Set {set_index}", min_value=0, max_value=100, value=rep_defaults[set_index - 1], step=1, key=f"reps_{profile.id}_{exercise.id}_{set_index}"))
-            if done:
-                logged.append({"exercise_id": exercise.exercise_id, "name": exercise.name, "weight_kg": float(weight), "reps": reps})
-        submitted = st.form_submit_button("Spara pass", use_container_width=True, type="primary")
+            st.markdown(
+                f"""
+                <div class="suggestion"><strong>{escape(suggestion.label)}</strong><span>{escape(suggestion.reason)}</span></div>
+                """,
+                unsafe_allow_html=True,
+            )
+            done = st.checkbox("Klar", key=f"done_{profile.id}_{exercise.id}")
+            weight = st.number_input("Vikt kg", min_value=0.0, max_value=500.0, value=float(suggestion.weight), step=0.5, key=f"weight_{profile.id}_{exercise.id}")
+            reps: list[int] = []
+            columns = st.columns(min(exercise.sets, 4))
+            for set_index in range(1, exercise.sets + 1):
+                with columns[(set_index - 1) % len(columns)]:
+                    reps.append(st.number_input(f"Set {set_index}", min_value=0, max_value=100, value=rep_defaults[set_index - 1], step=1, key=f"reps_{profile.id}_{exercise.id}_{set_index}"))
+        if done:
+            logged.append({"exercise_id": exercise.exercise_id, "name": exercise.name, "weight_kg": float(weight), "reps": reps})
+    submitted = st.button(
+        "Spara pass",
+        key=f"save_workout_{profile.id}_{selected_day}",
+        use_container_width=True,
+        type="primary",
+    )
 
     if submitted:
         try:
