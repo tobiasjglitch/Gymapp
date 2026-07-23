@@ -1,0 +1,568 @@
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    min-height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: Inter, system-ui, sans-serif;
+  }
+
+  #lat-pulldown-demo {
+    position: relative;
+    width: 100%;
+    height: 450px;
+    overflow: hidden;
+  }
+
+  #lat-pulldown-demo canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+
+  #lat-pulldown-status {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #667078;
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  #lat-pulldown-toggle {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid rgba(18, 21, 23, 0.16);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+    color: #151719;
+    box-shadow: 0 8px 24px rgba(18, 21, 23, 0.12);
+    font: inherit;
+    font-size: 17px;
+    cursor: pointer;
+  }
+
+  #lat-pulldown-toggle:disabled {
+    cursor: default;
+    opacity: 0;
+  }
+
+  #lat-pulldown-toggle:focus-visible {
+    outline: 3px solid rgba(14, 124, 102, 0.34);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 520px) {
+    #lat-pulldown-demo {
+      height: 410px;
+    }
+  }
+</style>
+
+<div id="lat-pulldown-demo">
+  <div id="lat-pulldown-status" role="status">Laddar utförande...</div>
+  <button id="lat-pulldown-toggle" type="button" aria-label="Pausa animationen" disabled>Ⅱ</button>
+</div>
+
+<script type="module">
+  (async () => {
+    const stage = document.getElementById("lat-pulldown-demo");
+    const status = document.getElementById("lat-pulldown-status");
+    const toggle = document.getElementById("lat-pulldown-toggle");
+
+    try {
+      const THREE = await import(
+        "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+      );
+
+      const palette = {
+        outline: new THREE.Color("#151719"),
+        skin: new THREE.Color("#98a19f"),
+        shirt: new THREE.Color("#19745f"),
+        shorts: new THREE.Color("#30353a"),
+        machine: new THREE.Color("#4f5960"),
+        machineInset: new THREE.Color("#7b858a"),
+        accent: new THREE.Color("#b68a3d"),
+        floor: new THREE.Color("#e5e8ea"),
+        light: new THREE.Color("#fffdf8"),
+      };
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+      camera.position.set(4.9, 2.65, 7.6);
+      camera.lookAt(0, 0.35, 0);
+
+      const renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        powerPreference: "high-performance",
+        preserveDrawingBuffer: true,
+      });
+      renderer.setClearColor(0x000000, 0);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.domElement.setAttribute("role", "img");
+      renderer.domElement.setAttribute(
+        "aria-label",
+        "En tredimensionell figur gör lat pulldown i en kabelmaskin"
+      );
+      stage.prepend(renderer.domElement);
+
+      const gradientMap = new THREE.DataTexture(
+        new Uint8Array([55, 105, 165, 225]),
+        4,
+        1,
+        THREE.RedFormat
+      );
+      gradientMap.minFilter = THREE.NearestFilter;
+      gradientMap.magFilter = THREE.NearestFilter;
+      gradientMap.needsUpdate = true;
+
+      scene.add(new THREE.HemisphereLight(palette.light, palette.floor, 0.8));
+
+      const keyLight = new THREE.DirectionalLight(palette.light, 1.55);
+      keyLight.position.set(4.5, 7, 5.5);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.set(1024, 1024);
+      keyLight.shadow.camera.near = 0.1;
+      keyLight.shadow.camera.far = 20;
+      keyLight.shadow.camera.left = -6;
+      keyLight.shadow.camera.right = 6;
+      keyLight.shadow.camera.top = 6;
+      keyLight.shadow.camera.bottom = -5;
+      scene.add(keyLight);
+
+      const rimLight = new THREE.DirectionalLight(palette.shirt, 0.6);
+      rimLight.position.set(-5, 3.5, -4);
+      scene.add(rimLight);
+
+      const outlineMaterial = new THREE.MeshBasicMaterial({
+        color: palette.outline,
+        side: THREE.BackSide,
+      });
+
+      const outlinedMesh = (geometry, color, outlineScale = 1.035) => {
+        const mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshToonMaterial({ color, gradientMap })
+        );
+        const outline = new THREE.Mesh(geometry, outlineMaterial);
+        outline.scale.setScalar(outlineScale);
+        outline.renderOrder = -1;
+        mesh.add(outline);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+      };
+
+      const sphere = (radius, color) =>
+        outlinedMesh(new THREE.SphereGeometry(radius, 20, 14), color, 1.045);
+
+      const staticSegment = (start, end, radius, color) => {
+        const direction = end.clone().sub(start);
+        const length = direction.length();
+        const geometry = new THREE.CapsuleGeometry(
+          radius,
+          Math.max(0.02, length - radius * 2),
+          6,
+          12
+        );
+        const mesh = outlinedMesh(geometry, color);
+        mesh.position.copy(start).add(end).multiplyScalar(0.5);
+        mesh.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          direction.normalize()
+        );
+        return mesh;
+      };
+
+      const dynamicSegment = (radius, color) => {
+        const geometry = new THREE.CapsuleGeometry(
+          radius,
+          Math.max(0.02, 1 - radius * 2),
+          6,
+          12
+        );
+        const mesh = outlinedMesh(geometry, color);
+        return {
+          mesh,
+          update(start, end) {
+            const direction = end.clone().sub(start);
+            const length = direction.length();
+            mesh.position.copy(start).add(end).multiplyScalar(0.5);
+            mesh.quaternion.setFromUnitVectors(
+              new THREE.Vector3(0, 1, 0),
+              direction.normalize()
+            );
+            mesh.scale.set(1, length, 1);
+          },
+        };
+      };
+
+      const content = new THREE.Group();
+      content.rotation.y = -0.12;
+      scene.add(content);
+
+      const machine = new THREE.Group();
+      machine.position.z = -0.48;
+      content.add(machine);
+
+      const framePart = (width, height, depth, x, y, z = 0) => {
+        const part = outlinedMesh(
+          new THREE.BoxGeometry(width, height, depth),
+          palette.machine,
+          1.025
+        );
+        part.position.set(x, y, z);
+        machine.add(part);
+      };
+
+      framePart(0.2, 4.8, 0.28, -1.6, 0.45);
+      framePart(0.2, 4.8, 0.28, 1.6, 0.45);
+      framePart(3.4, 0.2, 0.28, 0, 2.8);
+      framePart(3.45, 0.2, 0.72, 0, -1.88);
+
+      const stackHousing = outlinedMesh(
+        new THREE.BoxGeometry(0.88, 1.65, 0.5),
+        palette.machineInset,
+        1.025
+      );
+      stackHousing.position.set(-1.58, -0.9, 0.18);
+      machine.add(stackHousing);
+
+      for (let index = 0; index < 7; index += 1) {
+        const plate = outlinedMesh(
+          new THREE.BoxGeometry(0.7, 0.11, 0.42),
+          palette.machine,
+          1.025
+        );
+        plate.position.set(-1.58, -1.52 + index * 0.18, 0.47);
+        machine.add(plate);
+      }
+
+      const selectedPlate = outlinedMesh(
+        new THREE.BoxGeometry(0.74, 0.14, 0.46),
+        palette.accent,
+        1.035
+      );
+      selectedPlate.position.set(-1.58, -0.38, 0.47);
+      machine.add(selectedPlate);
+
+      const pulley = outlinedMesh(
+        new THREE.CylinderGeometry(0.24, 0.24, 0.16, 20),
+        palette.accent,
+        1.05
+      );
+      pulley.rotation.x = Math.PI / 2;
+      pulley.position.set(0, 2.58, 0.32);
+      machine.add(pulley);
+
+      const seat = outlinedMesh(
+        new THREE.BoxGeometry(0.92, 0.18, 1.05),
+        palette.shorts,
+        1.035
+      );
+      seat.position.set(0, -0.58, 0.32);
+      content.add(seat);
+
+      const seatPost = outlinedMesh(
+        new THREE.CylinderGeometry(0.11, 0.14, 1.2, 14),
+        palette.machine,
+        1.04
+      );
+      seatPost.position.set(0, -1.2, 0.28);
+      content.add(seatPost);
+
+      const thighPad = outlinedMesh(
+        new THREE.CapsuleGeometry(0.18, 0.9, 6, 14),
+        palette.shorts,
+        1.04
+      );
+      thighPad.rotation.z = Math.PI / 2;
+      thighPad.position.set(0, -0.18, 0.72);
+      content.add(thighPad);
+
+      const figure = new THREE.Group();
+      figure.position.z = 0.2;
+      content.add(figure);
+
+      const torso = outlinedMesh(
+        new THREE.CapsuleGeometry(0.5, 0.82, 8, 16),
+        palette.shirt
+      );
+      torso.position.y = 0.72;
+      torso.scale.z = 0.72;
+      figure.add(torso);
+
+      const pelvis = outlinedMesh(
+        new THREE.CylinderGeometry(0.34, 0.43, 0.5, 16),
+        palette.shorts,
+        1.03
+      );
+      pelvis.position.set(0, -0.2, 0.2);
+      pelvis.scale.z = 0.78;
+      figure.add(pelvis);
+
+      const neck = outlinedMesh(
+        new THREE.CylinderGeometry(0.16, 0.19, 0.34, 14),
+        palette.skin
+      );
+      neck.position.y = 1.66;
+      figure.add(neck);
+
+      const head = sphere(0.4, palette.skin);
+      head.position.y = 2.14;
+      head.scale.set(0.9, 1.08, 0.92);
+      figure.add(head);
+
+      const hipLeft = new THREE.Vector3(-0.28, -0.35, 0.32);
+      const hipRight = new THREE.Vector3(0.28, -0.35, 0.32);
+      const kneeLeft = new THREE.Vector3(-0.38, -0.82, 1.18);
+      const kneeRight = new THREE.Vector3(0.38, -0.82, 1.18);
+      const ankleLeft = new THREE.Vector3(-0.38, -1.66, 1.08);
+      const ankleRight = new THREE.Vector3(0.38, -1.66, 1.08);
+
+      figure.add(staticSegment(hipLeft, kneeLeft, 0.2, palette.skin));
+      figure.add(staticSegment(hipRight, kneeRight, 0.2, palette.skin));
+      figure.add(staticSegment(kneeLeft, ankleLeft, 0.17, palette.skin));
+      figure.add(staticSegment(kneeRight, ankleRight, 0.17, palette.skin));
+
+      for (const ankle of [ankleLeft, ankleRight]) {
+        const shoe = outlinedMesh(
+          new THREE.CapsuleGeometry(0.14, 0.38, 6, 12),
+          palette.shorts,
+          1.045
+        );
+        shoe.rotation.x = Math.PI / 2;
+        shoe.position.copy(ankle).add(new THREE.Vector3(0, -0.03, 0.22));
+        shoe.scale.y = 0.84;
+        figure.add(shoe);
+      }
+
+      const leftUpperArm = dynamicSegment(0.16, palette.skin);
+      const rightUpperArm = dynamicSegment(0.16, palette.skin);
+      const leftForearm = dynamicSegment(0.145, palette.skin);
+      const rightForearm = dynamicSegment(0.145, palette.skin);
+      figure.add(leftUpperArm.mesh);
+      figure.add(rightUpperArm.mesh);
+      figure.add(leftForearm.mesh);
+      figure.add(rightForearm.mesh);
+
+      const leftElbowJoint = sphere(0.16, palette.skin);
+      const rightElbowJoint = sphere(0.16, palette.skin);
+      const leftHand = sphere(0.15, palette.skin);
+      const rightHand = sphere(0.15, palette.skin);
+      figure.add(leftElbowJoint, rightElbowJoint, leftHand, rightHand);
+
+      const bar = outlinedMesh(
+        new THREE.CylinderGeometry(0.055, 0.055, 2.65, 16),
+        palette.accent,
+        1.05
+      );
+      bar.rotation.z = Math.PI / 2;
+      figure.add(bar);
+
+      const cableGeometry = new THREE.BufferGeometry();
+      const cablePositions = new Float32Array(6);
+      cableGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(cablePositions, 3)
+      );
+      const cable = new THREE.Line(
+        cableGeometry,
+        new THREE.LineBasicMaterial({ color: palette.outline })
+      );
+      content.add(cable);
+
+      const ground = new THREE.Mesh(
+        new THREE.CircleGeometry(3.7, 64),
+        new THREE.MeshStandardMaterial({
+          color: palette.floor,
+          transparent: true,
+          opacity: 0.9,
+          roughness: 1,
+        })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -1.9;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      let paused = false;
+      let elapsedBeforePause = 0;
+      let animationStart = performance.now();
+      let dragging = false;
+      let pointerX = 0;
+      let targetRotation = content.rotation.y;
+      let canvasVerified = false;
+
+      const smoothStep = (value) => value * value * (3 - 2 * value);
+
+      const pullProgress = (elapsedSeconds) => {
+        const cycle = (elapsedSeconds % 4.4) / 4.4;
+        if (cycle < 0.16) return 0;
+        if (cycle < 0.44) return smoothStep((cycle - 0.16) / 0.28);
+        if (cycle < 0.62) return 1;
+        return 1 - smoothStep((cycle - 0.62) / 0.38);
+      };
+
+      const setPaused = (nextPaused) => {
+        if (nextPaused === paused) return;
+        paused = nextPaused;
+        if (paused) {
+          elapsedBeforePause += (performance.now() - animationStart) / 1000;
+        } else {
+          animationStart = performance.now();
+        }
+        toggle.textContent = paused ? "▶" : "Ⅱ";
+        toggle.setAttribute(
+          "aria-label",
+          paused ? "Spela animationen" : "Pausa animationen"
+        );
+        toggle.setAttribute("aria-pressed", String(paused));
+      };
+
+      toggle.addEventListener("click", () => setPaused(!paused));
+
+      renderer.domElement.addEventListener("pointerdown", (event) => {
+        dragging = true;
+        pointerX = event.clientX;
+        renderer.domElement.setPointerCapture(event.pointerId);
+      });
+
+      renderer.domElement.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        targetRotation += (event.clientX - pointerX) * 0.008;
+        pointerX = event.clientX;
+      });
+
+      const stopDragging = (event) => {
+        dragging = false;
+        if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+          renderer.domElement.releasePointerCapture(event.pointerId);
+        }
+      };
+
+      renderer.domElement.addEventListener("pointerup", stopDragging);
+      renderer.domElement.addEventListener("pointercancel", stopDragging);
+
+      const resize = () => {
+        const width = Math.max(1, stage.clientWidth);
+        const height = Math.max(1, stage.clientHeight);
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      };
+
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(stage);
+      resize();
+
+      const renderFrame = (now) => {
+        const elapsed = paused
+          ? elapsedBeforePause
+          : elapsedBeforePause + (now - animationStart) / 1000;
+        const progress = pullProgress(elapsed);
+
+        const shoulderLeft = new THREE.Vector3(-0.55, 1.32, 0);
+        const shoulderRight = new THREE.Vector3(0.55, 1.32, 0);
+        const elbowLeft = new THREE.Vector3(
+          -0.78 - progress * 0.08,
+          2.02 - progress * 0.68,
+          0.02
+        );
+        const elbowRight = new THREE.Vector3(
+          0.78 + progress * 0.08,
+          2.02 - progress * 0.68,
+          0.02
+        );
+        const barY = 2.55 - progress * 0.83;
+        const handLeftPosition = new THREE.Vector3(-1.03, barY, 0.02);
+        const handRightPosition = new THREE.Vector3(1.03, barY, 0.02);
+
+        leftUpperArm.update(shoulderLeft, elbowLeft);
+        rightUpperArm.update(shoulderRight, elbowRight);
+        leftForearm.update(elbowLeft, handLeftPosition);
+        rightForearm.update(elbowRight, handRightPosition);
+
+        leftElbowJoint.position.copy(elbowLeft);
+        rightElbowJoint.position.copy(elbowRight);
+        leftHand.position.copy(handLeftPosition);
+        rightHand.position.copy(handRightPosition);
+        bar.position.y = barY;
+
+        cablePositions[0] = 0;
+        cablePositions[1] = 2.1;
+        cablePositions[2] = -0.16;
+        cablePositions[3] = 0;
+        cablePositions[4] = barY;
+        cablePositions[5] = 0.22;
+        cableGeometry.attributes.position.needsUpdate = true;
+
+        selectedPlate.position.y = -0.38 + progress * 0.24;
+        pulley.rotation.z = elapsed * 0.8;
+        torso.rotation.x = -progress * 0.08;
+        content.rotation.y += (targetRotation - content.rotation.y) * 0.12;
+
+        renderer.render(scene, camera);
+
+        if (!canvasVerified) {
+          const gl = renderer.getContext();
+          const sample = new Uint8Array(4);
+          const width = renderer.domElement.width;
+          const height = renderer.domElement.height;
+          let visibleSamples = 0;
+          for (const point of [
+            [0.5, 0.5],
+            [0.28, 0.35],
+            [0.72, 0.35],
+            [0.3, 0.7],
+            [0.68, 0.7],
+          ]) {
+            gl.readPixels(
+              Math.floor(width * point[0]),
+              Math.floor(height * point[1]),
+              1,
+              1,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              sample
+            );
+            if (sample[3] > 8) visibleSamples += 1;
+          }
+          if (visibleSamples > 0) {
+            canvasVerified = true;
+            status.hidden = true;
+            toggle.disabled = false;
+          }
+        }
+
+        requestAnimationFrame(renderFrame);
+      };
+
+      requestAnimationFrame(renderFrame);
+
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setPaused(true);
+      }
+    } catch (error) {
+      status.textContent = "Kunde inte ladda 3D-visningen.";
+      status.style.color = "#b42318";
+    }
+  })();
+</script>
