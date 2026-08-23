@@ -1097,8 +1097,46 @@ def page_styles() -> None:
         .hint { color:var(--muted); font-size:.88rem; margin-top:.16rem; }
         .technique-dialog-title { color:var(--ink); font-size:1.08rem; font-weight:800; margin-bottom:.35rem; }
         div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:8px; border-color:rgba(17,17,17,.10); box-shadow:0 14px 34px rgba(17,17,17,.055); background:rgba(255,255,255,.9); }
-        .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.25rem; border-radius:8px; font-weight:800; border:1px solid rgba(17,17,17,.12); }
-        [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] { background:#111!important; color:white!important; }
+        .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button {
+            min-height:3.25rem; border-radius:8px; font-weight:800;
+            border:1px solid rgba(17,17,17,.16)!important;
+            background:#fff!important; color:#111!important; opacity:1!important;
+        }
+        .stButton>button p,[data-testid="stFormSubmitButton"] button p,.stDownloadButton button p,
+        .stButton>button span,[data-testid="stFormSubmitButton"] button span,.stDownloadButton button span {
+            color:#111!important; opacity:1!important;
+        }
+        .stButton>button:hover,[data-testid="stFormSubmitButton"] button:hover,.stDownloadButton button:hover {
+            border-color:#111!important; background:#f2f4f6!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] {
+            background:#111!important; border-color:#111!important; color:#fff!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"] p,.stButton>button[kind="primary"] p,
+        [data-testid="stFormSubmitButton"] button[kind="primary"] span,.stButton>button[kind="primary"] span {
+            color:#fff!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"]:hover,.stButton>button[kind="primary"]:hover {
+            background:#2c3035!important; border-color:#2c3035!important;
+        }
+        .stButton>button:disabled,[data-testid="stFormSubmitButton"] button:disabled,.stDownloadButton button:disabled {
+            background:#eceff2!important; border-color:#d8dde3!important; color:#7a828e!important;
+        }
+        .stButton>button:disabled p,[data-testid="stFormSubmitButton"] button:disabled p,.stDownloadButton button:disabled p {
+            color:#7a828e!important;
+        }
+        .stButton>button:focus-visible,[data-testid="stFormSubmitButton"] button:focus-visible,.stDownloadButton button:focus-visible {
+            outline:3px solid rgba(14,124,102,.28)!important; outline-offset:2px;
+        }
+        [data-testid="stExpander"] details { border:1px solid var(--line)!important; border-radius:8px!important; background:#fff!important; overflow:hidden; }
+        [data-testid="stExpander"] summary { min-height:3.2rem; background:#fff!important; color:#111!important; }
+        [data-testid="stExpander"] summary:hover { background:#f5f7f8!important; }
+        [data-testid="stExpander"] summary p,[data-testid="stExpander"] summary span,[data-testid="stExpander"] summary svg {
+            color:#111!important; fill:#111!important; opacity:1!important;
+        }
+        [data-testid="stNumberInput"] button { background:#f3f5f7!important; color:#111!important; border-color:var(--line)!important; }
+        [data-testid="stNumberInput"] button:hover { background:#e7eaee!important; }
+        [data-testid="stNumberInput"] button svg { color:#111!important; fill:#111!important; }
         div[role="radiogroup"] { gap:.35rem; flex-wrap:wrap; }
         div[role="radiogroup"] label { border:1px solid rgba(17,17,17,.14); border-radius:999px; padding:.18rem .55rem; background:white; color:#111!important; opacity:1!important; }
         div[role="radiogroup"] label span,div[role="radiogroup"] label p { color:#111!important; opacity:1!important; }
@@ -1107,11 +1145,16 @@ def page_styles() -> None:
         input,textarea { border-radius:8px!important; background:#fff!important; color:#111!important; caret-color:#111!important; }
         div[data-baseweb="input"],div[data-baseweb="textarea"],div[data-baseweb="select"]>div { background:#fff!important; color:#111!important; border-color:var(--line)!important; }
         div[data-baseweb="select"] span,div[data-baseweb="select"] svg { color:#111!important; fill:#111!important; }
+        div[data-baseweb="popover"],ul[role="listbox"],li[role="option"] { background:#fff!important; color:#111!important; }
+        li[role="option"] p,li[role="option"] span { color:#111!important; opacity:1!important; }
+        [data-testid="stAlert"] p,[data-testid="stAlert"] div { opacity:1!important; }
         @media (max-width:620px) {
             .block-container { padding-left:.8rem; padding-right:.8rem; padding-top:.65rem; }
             .hero { padding:.95rem; } .metric-row { grid-template-columns:1fr 1fr; gap:.5rem; }
             .metric-row .mini-card:last-child { grid-column:1/-1; }
             .exercise-head { align-items:flex-start; }
+            .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.4rem; }
+            [data-testid="stExpander"] summary { min-height:3.4rem; }
         }
         </style>
         """,
@@ -1349,7 +1392,7 @@ def render_profiles(active_profile: Profile) -> None:
             st.error(str(exc))
         else:
             st.session_state["profile_id"] = profile.id
-            st.success(f"Profilen {profile.name} är skapad med ett eget startprogram.")
+            st.session_state["created_profile_name"] = profile.name
             st.rerun()
 
 
@@ -1381,6 +1424,9 @@ def main() -> None:
         profiles = [profile]
 
     st.markdown("<div class='hero'><div class='title'>Lyftlogg</div></div>", unsafe_allow_html=True)
+    created_profile_name = st.session_state.pop("created_profile_name", None)
+    if created_profile_name:
+        st.success(f"Profilen {created_profile_name} är skapad med ett eget startprogram.")
 
     profile_ids = [profile.id for profile in profiles]
     selected_id = st.session_state.get("profile_id", profile_ids[0])
