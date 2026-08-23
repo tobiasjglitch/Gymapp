@@ -1119,10 +1119,24 @@ def page_styles() -> None:
     )
 
 
+def apply_pending_workout_transition(profile_id: int) -> bool:
+    pending = st.session_state.pop(f"pending_workout_transition_{profile_id}", None)
+    if not pending:
+        return False
+
+    st.session_state[f"selected_day_{profile_id}"] = pending["next_day"]
+    for widget_key in pending.get("clear_keys", []):
+        st.session_state.pop(widget_key, None)
+    return True
+
+
 def render_today(profile: Profile) -> None:
+    workout_saved = apply_pending_workout_transition(profile.id)
     default_day = suggested_day(profile.id)
     key = f"selected_day_{profile.id}"
     selected_day = st.selectbox("Pass", DAY_NAMES, index=DAY_NAMES.index(st.session_state.get(key, default_day)), key=key)
+    if workout_saved:
+        st.success("Passet är sparat.")
     plan = list_program(profile.id, selected_day)
     history = history_dataframe(profile.id)
     if not plan:
@@ -1204,8 +1218,22 @@ def render_today(profile: Profile) -> None:
         except Exception as exc:
             st.error(str(exc))
         else:
-            st.session_state[key] = DAY_NAMES[(DAY_NAMES.index(selected_day) + 1) % len(DAY_NAMES)]
-            st.success("Passet är sparat.")
+            clear_keys = [f"notes_{profile.id}_{selected_day}"]
+            for exercise in plan:
+                clear_keys.extend(
+                    [
+                        f"done_{profile.id}_{exercise.id}",
+                        f"weight_{profile.id}_{exercise.id}",
+                        *[
+                            f"reps_{profile.id}_{exercise.id}_{set_index}"
+                            for set_index in range(1, exercise.sets + 1)
+                        ],
+                    ]
+                )
+            st.session_state[f"pending_workout_transition_{profile.id}"] = {
+                "next_day": DAY_NAMES[(DAY_NAMES.index(selected_day) + 1) % len(DAY_NAMES)],
+                "clear_keys": clear_keys,
+            }
             st.rerun()
 
 
