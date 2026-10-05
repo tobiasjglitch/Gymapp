@@ -1,30 +1,41 @@
-# Deploy av Gymapp v2
+# Deploy av Lyftlogg
 
-## 1. Supabase
+## Kod
 
-1. Öppna Supabase.
-2. Skapa ett nytt projekt, eller använd ett befintligt.
-3. Gå till SQL Editor.
-4. Klistra in innehållet från `supabase_schema_v2.sql`.
-5. Kör SQL.
-6. Gå till Project Settings -> API.
-7. Kopiera `Project URL` och `anon public` key.
+`app.py` är den enda riktiga appfilen. `app_v2.py` och `app_v3.py` är små
+kompatibilitetsfiler så den befintliga Streamlit-deployen fortsätter fungera.
 
-## 2. Streamlit Community Cloud
+## Supabase
 
-1. Öppna https://share.streamlit.io
-2. Skapa en app från GitHub-repot.
-3. Entry point ska vara `app.py`.
-4. Lägg in Secrets:
+Kör SQL-filerna i den här ordningen i Supabase SQL Editor:
+
+1. `supabase_schema_v2.sql` för en helt ny databas.
+2. `supabase_migration_profiles_v3.sql`.
+3. `supabase_migration_start_values_v4.sql`.
+4. `supabase_migration_hardening_v5.sql`.
+
+V5 aktiverar RLS, stänger publik läsning av träningsdata, lägger till autosparade
+utkast och gör sparning av träningspass idempotent.
+
+## Streamlit Secrets
+
+Lägg bara hemligheter i Streamlit Cloud, aldrig i GitHub-repot:
 
 ```toml
-APP_PIN = "välj-en-pin"
+APP_PIN = "din-pin"
 
 [supabase]
-url = "din-supabase-url"
-anon_key = "din-supabase-anon-key"
+url = "https://ditt-projekt.supabase.co"
+service_role_key = "din-servernyckel"
 ```
 
-## 3. Efter deploy
+Servernyckeln får aldrig placeras i webbläsarkod eller delas publikt. Lyftlogg
+kör all databaskod på Streamlit-servern och blockerar uppstart om nyckeln eller
+`APP_PIN` saknas.
 
-Appen skapar startprogrammet själv första gången den startar, om programtabellen är tom.
+## Kontroll efter deploy
+
+1. Lås upp appen med PIN.
+2. Byt mellan profiler och kontrollera att rätt program visas.
+3. Ändra en vikt, ladda om sidan och kontrollera att utkastet återställs.
+4. Spara ett testpass och kontrollera PB, Trend och Historik.

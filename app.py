@@ -1,686 +1,1885 @@
-# app.py — Gymapp (Streamlit + Supabase)
-# UI på svenska, mobilvänligt. Ingen PIN.
-#
-# Databas:
-#   exercises(id, name, cue, icon_path)
-#   program_weeks(week, day, exercise_id, sets, rep_min, rep_max)   # dag-kolumnen heter "day"
-#   workouts(id, date, day_label)
-#   sets(workout_id, exercise_id, set_no, reps, weight_kg, pr_flag)
-#
-# Viktigt:
-# - Vi visar "Pass 1–4" i UI, men använder fortfarande "Upper A", "Lower A", "Upper B", "Lower B" i DB.
-# - "Spara hela passet" gör DB-skrivning (inga tomma workouts).
-# - Double progression inkl. -5 % backoff (två pass i rad under rep_min).
-# - Deload vecka 12: vikt sänks (0.6x) och setvolym sänks i seed.
-# - Vikt anges EN gång per övning. Reps per set.
-#
-# OBS: Om "Program"-fliken visar fel vecka, justera i UI så att den läser st.session_state["active_week"].
+from __future__ import annotations
 
+import json
 import os
-from datetime import date
-from typing import List, Tuple, Optional, Dict
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import date, datetime
+from html import escape
+from pathlib import Path
+from typing import Any
 
-import streamlit as st
-from supabase import create_client, Client
 import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
 
-# =========================
-# ---- Grundinställningar
-# =========================
-st.set_page_config(page_title="Gymapp", page_icon="💪", layout="centered")
+try:
+    from supabase import Client, create_client
+except Exception:  # Supabase is only required in cloud mode.
+    Client = Any
+    create_client = None
 
-# Mobilvänlig stil
-st.markdown("""
-<style>
-:root { --pill-bg:#f1f5f9; --pill-fg:#0f172a; }
-.badge{display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:var(--pill-bg);color:var(--pill-fg);font-weight:600}
-.pill{display:inline-block;padding:.15rem .5rem;border-radius:9999px;background:#e2e8f0;color:#111827;font-weight:600}
-.pill-live{background:#dcfce7;color:#14532d}
-.stButton>button, [data-testid="stFormSubmitButton"] button{min-height:56px}
-[data-testid="stHeader"]{position:sticky;top:0;background:var(--background-color);z-index:1000}
-</style>
-""", unsafe_allow_html=True)
 
-# =========================
-# ---- Dag-mappning (UI ↔ DB)
-# =========================
-# DB har: "Upper A", "Lower A", "Upper B", "Lower B"
-DAY_CANON = ["Upper A", "Lower A", "Upper B", "Lower B"]      # används mot DB
-DAY_UI    = ["Pass 1", "Pass 2", "Pass 3", "Pass 4"]          # visas i UI
+APP_DIR = Path(__file__).parent
+DB_PATH = APP_DIR / "gymapp.db"
+DAY_NAMES = ["Pass 1", "Pass 2", "Pass 3", "Pass 4"]
+VIEWS = ["Idag", "Program", "PB", "Trend", "Historik", "Profiler", "Export"]
+TECHNIQUE_DEMOS = {
+    "ab roller": "ab_roller",
+    "ab roller?": "ab_roller",
+    "abduction": "hip_abduction",
+    "abs bench": "abs_bench",
+    "axelpress hantlar": "shoulder_press",
+    "bakåtlunges": "reverse_lunge",
+    "barbell hip thrust": "hip_thrust",
+    "bench leg raises": "bench_leg_raise",
+    "bicepscurl hantlar": "biceps_curl",
+    "bulgarian split squat": "split_squat",
+    "cable chest press": "cable_press",
+    "cable flyes": "cable_fly",
+    "calf raises": "calf_raise",
+    "chest supported rows": "chest_supported_row",
+    "chin ups": "chinup",
+    "db leg rdl": "rdl",
+    "enarms hantelrodd": "one_arm_row",
+    "face pull": "face_pull",
+    "face pulls": "face_pull",
+    "farmers walk": "carry",
+    "flat bench leg raises": "bench_leg_raise",
+    "flat press": "bench_press",
+    "front shoulders db": "front_raise",
+    "frontböj": "front_squat",
+    "goblet squat": "goblet_squat",
+    "hammer curls": "hammer_curl",
+    "hanging leg curls": "hanging_leg_raise",
+    "hanging leg raises": "hanging_leg_raise",
+    "hantelpress plan bänk": "bench_press",
+    "hip abduction": "hip_abduction",
+    "hip thrusts": "hip_thrust",
+    "hollow body holds": "hollow_hold",
+    "hollow hold": "hollow_hold",
+    "incl./preacher curls": "preacher_curl",
+    "incl. press": "incline_press",
+    "incline db chest press": "incline_press",
+    "incline db press": "incline_press",
+    "incline press bb": "incline_press",
+    "kabel woodchop": "woodchop",
+    "kabel-crunch": "cable_crunch",
+    "kabel-flyes": "cable_fly",
+    "knäböj": "squat",
+    "landmine rotation": "landmine_rotation",
+    "lat pull down": "lat_pulldown",
+    "lat pulldown": "lat_pulldown",
+    "latsdrag": "lat_pulldown",
+    "lateral raises": "lateral_raise",
+    "lateral raises cable": "lateral_raise",
+    "lean away laterals": "lateral_raise",
+    "leg curls": "leg_curl",
+    "leg curls (hamstrings)": "leg_curl",
+    "leg curls?": "leg_curl",
+    "leg press machine": "leg_press",
+    "lutande hantelpress": "incline_press",
+    "marklyft": "deadlift",
+    "overhead extensions": "overhead_extension",
+    "preacher curls": "preacher_curl",
+    "pullups": "pullup",
+    "push-ups med vikt": "push_up",
+    "pushdown": "triceps_pushdown",
+    "rear delt flies": "rear_delt_fly",
+    "reverse lunges": "reverse_lunge",
+    "raka marklyft": "rdl",
+    "russian twists": "russian_twist",
+    "seated cable low rows": "seated_row",
+    "side lateral raises": "lateral_raise",
+    "sidolyft hantlar": "lateral_raise",
+    "spider curls": "spider_curl",
+    "straight arm pulldown": "straight_arm_pulldown",
+    "suitcase carry": "carry",
+    "sumo squats": "sumo_squat",
+    "triceps pushdown": "triceps_pushdown",
+    "wide pull ups": "pullup",
+    "woodchopper": "woodchop",
+    "wrist curls": "wrist_curl",
+}
 
-ui_to_canon = dict(zip(DAY_UI, DAY_CANON))
-canon_to_ui = dict(zip(DAY_CANON, DAY_UI))
+STARTER_PROGRAM = {
+    "Pass 1": [
+        ("Lutande hantelpress", 4, 6, 10),
+        ("Kabel-flyes", 3, 8, 12),
+        ("Enarms hantelrodd", 3, 8, 12),
+        ("Sidolyft hantlar", 3, 10, 15),
+        ("Triceps pushdown", 3, 8, 12),
+    ],
+    "Pass 2": [
+        ("Knäböj", 4, 5, 8),
+        ("Raka marklyft", 4, 6, 10),
+        ("Bulgarian split squat", 3, 8, 12),
+        ("Kabel-crunch", 3, 10, 15),
+    ],
+    "Pass 3": [
+        ("Hantelpress plan bänk", 4, 6, 10),
+        ("Push-ups med vikt", 3, 6, 12),
+        ("Face pull", 3, 10, 15),
+        ("Axelpress hantlar", 3, 6, 10),
+        ("Bicepscurl hantlar", 3, 8, 12),
+    ],
+    "Pass 4": [
+        ("Marklyft", 3, 3, 6),
+        ("Frontböj", 3, 5, 8),
+        ("Goblet squat", 3, 8, 12),
+        ("Bakåtlunges", 3, 8, 12),
+        ("Kabel woodchop", 3, 10, 15),
+    ],
+}
 
-# =========================
-# ---- Supabase-klient
-# =========================
-def _read_supabase_creds() -> Tuple[Optional[str], Optional[str]]:
-    # 1) streamlit secrets
-    url = st.secrets.get("supabase", {}).get("url") if "supabase" in st.secrets else st.secrets.get("SUPABASE_URL")
-    key = st.secrets.get("supabase", {}).get("anon_key") if "supabase" in st.secrets else st.secrets.get("SUPABASE_KEY")
-    if url and key:
-        return url, key
-    # 2) env
-    url = os.environ.get("SUPABASE_URL") or url
-    key = os.environ.get("SUPABASE_KEY") or key
-    if url and key:
-        return url, key
-    # 3) minimal TOML-läsare lokalt
-    def _load_toml_min(path: str):
-        data, current = {}, None
-        if not os.path.exists(path): return {}
-        with open(path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#"): continue
-                if line.startswith("[") and line.endswith("]"):
-                    current = line.strip("[]")
-                    data[current] = {}
-                elif "=" in line:
-                    k,v = line.split("=",1)
-                    k = k.strip()
-                    v = v.strip().strip('"').strip("'")
-                    if current: data[current][k]=v
-                    else: data[k]=v
-        return data
-    for p in ("./streamlit_config/secrets.toml",
-              os.path.expanduser("~/Documents/Gymapp/streamlit_config/secrets.toml")):
-        try:
-            sec = _load_toml_min(p)
-            sec = sec.get("supabase", sec)
-            url = sec.get("url") or sec.get("SUPABASE_URL")
-            key = sec.get("anon_key") or sec.get("SUPABASE_KEY")
-            if url and key: return url, key
-        except Exception:
-            pass
-    return None, None
 
-def get_supabase_client() -> Client:
-    url, key = _read_supabase_creds()
+@dataclass(frozen=True)
+class Profile:
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class ProgramExercise:
+    id: int
+    exercise_id: int
+    name: str
+    day_name: str
+    sort_order: int
+    sets: int
+    rep_min: int
+    rep_max: int
+    start_weight_kg: float | None = None
+    start_reps: tuple[int, ...] = ()
+    weight_step_kg: float = 2.5
+
+
+@dataclass(frozen=True)
+class WeightSuggestion:
+    weight: float
+    label: str
+    reason: str
+
+
+def _secret_value(section: str, key: str) -> str | None:
+    env_key = f"{section}_{key}".upper()
+    if os.environ.get(env_key):
+        return os.environ[env_key]
+    secret_files = (
+        APP_DIR / ".streamlit" / "secrets.toml",
+        Path.cwd() / ".streamlit" / "secrets.toml",
+        Path.home() / ".streamlit" / "secrets.toml",
+    )
+    if not any(path.is_file() for path in secret_files):
+        return None
+    try:
+        if section in st.secrets and key in st.secrets[section]:
+            return str(st.secrets[section][key])
+    except Exception:
+        return None
+    return None
+
+
+def _top_level_secret(key: str) -> str | None:
+    secret_files = (
+        APP_DIR / ".streamlit" / "secrets.toml",
+        Path.cwd() / ".streamlit" / "secrets.toml",
+        Path.home() / ".streamlit" / "secrets.toml",
+    )
+    if not any(path.is_file() for path in secret_files):
+        return None
+    try:
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        return None
+    return None
+
+
+def app_pin() -> str | None:
+    if os.environ.get("APP_PIN"):
+        return os.environ["APP_PIN"]
+    return _top_level_secret("APP_PIN") or _secret_value("app", "pin")
+
+
+def supabase_settings() -> tuple[str | None, str | None, str | None]:
+    url = _secret_value("supabase", "url")
+    server_key = (
+        _secret_value("supabase", "service_role_key")
+        or _secret_value("supabase", "secret_key")
+    )
+    public_key = (
+        _secret_value("supabase", "anon_key")
+        or _secret_value("supabase", "publishable_key")
+    )
+    return url, server_key, public_key
+
+
+def require_secure_configuration() -> None:
+    url, server_key, public_key = supabase_settings()
+    if not url and not server_key and not public_key:
+        return
+
+    problems = []
+    if not url:
+        problems.append("Supabase-adressen saknas.")
+    if not server_key:
+        problems.append("Supabase servernyckel saknas. En publik nyckel får inte läsa träningsdata.")
+    if not app_pin():
+        problems.append("APP_PIN saknas. Molnappen får inte starta olåst.")
+    if not problems:
+        return
+
+    st.error("Appen är låst tills säkerhetsinställningarna är klara.")
+    for problem in problems:
+        st.write(f"- {problem}")
+    st.caption("Lägg in värdena i Streamlit Secrets och kör den senaste Supabase-migreringen.")
+    st.stop()
+
+
+def require_pin_if_configured() -> None:
+    pin = app_pin()
+    if not pin or st.session_state.get("unlocked"):
+        return
+
+    st.markdown(
+        """
+        <div class="hero login-hero">
+            <div class="eyebrow">Privat app</div>
+            <div class="title">Lyftlogg</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    typed = st.text_input("PIN", type="password", placeholder="Ange din PIN")
+    if st.button("Lås upp", use_container_width=True, type="primary"):
+        if typed == pin:
+            st.session_state["unlocked"] = True
+            st.rerun()
+        else:
+            st.error("Fel PIN.")
+    st.stop()
+
+
+def supabase_credentials() -> tuple[str | None, str | None]:
+    url, server_key, _ = supabase_settings()
+    return url, server_key
+
+
+def use_supabase() -> bool:
+    url, key = supabase_credentials()
+    return bool(url and key)
+
+
+def uses_server_key() -> bool:
+    return bool(supabase_settings()[1])
+
+
+@st.cache_resource
+def supabase_client() -> Client:
+    if create_client is None:
+        st.error("Supabase-paketet saknas.")
+        st.stop()
+    url, key = supabase_credentials()
     if not url or not key:
-        st.error("Hittar inte Supabase-nycklar. Lägg dem under [supabase] url/anon_key eller SUPABASE_URL/SUPABASE_KEY.")
+        st.error("Supabase-inställningarna saknas.")
         st.stop()
     return create_client(url, key)
 
-sb: Client = get_supabase_client()
 
-# =========================
-# ---- Konstanter & Helpers
-# =========================
-DEFAULT_DELOAD_FACTOR = 0.6
+@contextmanager
+def db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
-def is_lower_body(name: str) -> bool:
-    low = name.lower()
-    keys = ["böj", "squat", "mark", "lunges", "vadpress", "hip", "thrust", "pull-through", "calf"]
-    return any(k in low for k in keys)
 
-def phase_for_week(idx: int) -> str:
-    v = idx + 1
-    if 1 <= v <= 8: return "Hypertrofi"
-    if 9 <= v <= 11: return "Styrka"
-    return "Deload"
+def _sqlite_column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})"))
 
-def double_progression_bump(ex_name: str) -> float:
-    # +2.5 kg press/rygg, +5 kg ben/hip (heuristiskt via namn)
-    return 5.0 if is_lower_body(ex_name) else 2.5
 
-# =========================
-# ---- DB helpers
-# =========================
-def fetch_exercise(ex_id: str) -> Optional[Dict]:
-    res = sb.from_("exercises").select("*").eq("id", ex_id).limit(1).execute().data
-    return res[0] if res else None
+def _sqlite_has_legacy_program_constraint(conn: sqlite3.Connection) -> bool:
+    for index in conn.execute("PRAGMA index_list(program_exercises)"):
+        if not index["unique"]:
+            continue
+        columns = [
+            row["name"]
+            for row in conn.execute(f"PRAGMA index_info('{index['name']}')")
+        ]
+        if columns == ["day_name", "exercise_id"]:
+            return True
+    return False
 
-def fetch_program_for_day(week_idx: int, canon_day: str) -> List[Dict]:
-    # week_idx 0..11 -> DB week 1..12
-    w = week_idx + 1
-    rows = (
-        sb.from_("program_weeks")
-        .select("*,exercises(*)")
-        .eq("week", w)
-        .eq("day", canon_day)
-        .order("exercise_id", desc=False)
-        .execute()
-        .data or []
+
+def _migrate_local_program_profiles(conn: sqlite3.Connection, default_profile_id: int) -> None:
+    has_profile_id = _sqlite_column_exists(conn, "program_exercises", "profile_id")
+    if has_profile_id and not _sqlite_has_legacy_program_constraint(conn):
+        return
+
+    conn.execute("ALTER TABLE program_exercises RENAME TO program_exercises_legacy")
+    conn.execute(
+        """
+        CREATE TABLE program_exercises (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            day_name TEXT NOT NULL,
+            exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+            sort_order INTEGER NOT NULL,
+            sets INTEGER NOT NULL,
+            rep_min INTEGER NOT NULL,
+            rep_max INTEGER NOT NULL,
+            start_weight_kg REAL,
+            start_reps TEXT,
+            weight_step_kg REAL NOT NULL DEFAULT 2.5,
+            active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(profile_id, day_name, exercise_id)
+        )
+        """
     )
-    return rows
+    if has_profile_id:
+        conn.execute(
+            """
+            INSERT INTO program_exercises
+                (id, profile_id, day_name, exercise_id, sort_order, sets, rep_min, rep_max, active)
+            SELECT id, COALESCE(profile_id, ?), day_name, exercise_id,
+                   sort_order, sets, rep_min, rep_max, active
+            FROM program_exercises_legacy
+            """,
+            (default_profile_id,),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO program_exercises
+                (id, profile_id, day_name, exercise_id, sort_order, sets, rep_min, rep_max, active)
+            SELECT id, ?, day_name, exercise_id, sort_order, sets, rep_min, rep_max, active
+            FROM program_exercises_legacy
+            """,
+            (default_profile_id,),
+        )
+    conn.execute("DROP TABLE program_exercises_legacy")
 
-def fetch_sets_for_workout(workout_id: str) -> List[Dict]:
-    return (
-        sb.from_("sets")
-        .select("*")
-        .eq("workout_id", workout_id)
-        .order("exercise_id", desc=False)
-        .order("set_no", desc=False)
-        .execute()
-        .data or []
-    )
 
-def personal_bests_map() -> Dict[Tuple[str,float], int]:
-    # (exercise_id, weight) -> max reps
-    rows = (
-        sb.from_("sets")
-        .select("exercise_id,weight_kg,reps")
-        .execute()
-        .data or []
-    )
-    best: Dict[Tuple[str,float], int] = {}
-    for r in rows:
-        key = (r["exercise_id"], float(r["weight_kg"]))
-        best[key] = max(best.get(key, 0), int(r["reps"]))
-    return best
+def init_db() -> None:
+    if use_supabase():
+        return
+    with db_connection() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
 
-# =========================
-# ---- Progressionslogik
-# =========================
-def propose_weight(ex_name: str, rep_min: int, rep_max: int, week_idx: int, history: List[Dict]) -> float:
-    """
-    Double progression:
-      - När alla set når rep_max → +2.5 kg (press/rygg) / +5 kg (ben/hip)
-      - Två pass i rad under rep_min → −5% vikt
-      - Vecka 12 (Deload) → multiplicera med 0.6
-    """
-    # Hitta senaste vikt + reps
-    last_weight = None
-    last_all_sets = []
-    for h in history:
-        if h["exercise"] == ex_name:
-            last_weight = float(h["weight"])
-            last_all_sets = list(map(int, h["reps"]))
-            break
+            CREATE TABLE IF NOT EXISTS exercises (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
 
-    # Ingen historik – föreslå "startvikt" via cue (om siffra finns) annars 0
-    if last_weight is None:
-        ex = (
-            sb.from_("exercises")
-            .select("cue")
-            .eq("name", ex_name)
+            CREATE TABLE IF NOT EXISTS program_exercises (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+                day_name TEXT NOT NULL,
+                exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+                sort_order INTEGER NOT NULL,
+                sets INTEGER NOT NULL,
+                rep_min INTEGER NOT NULL,
+                rep_max INTEGER NOT NULL,
+                start_weight_kg REAL,
+                start_reps TEXT,
+                weight_step_kg REAL NOT NULL DEFAULT 2.5,
+                active INTEGER NOT NULL DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS workouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER REFERENCES profiles(id),
+                workout_date TEXT NOT NULL,
+                day_name TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                client_token TEXT UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS workout_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workout_id INTEGER NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+                exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+                set_no INTEGER NOT NULL,
+                reps INTEGER NOT NULL,
+                weight_kg REAL NOT NULL,
+                is_pr INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(workout_id, exercise_id, set_no)
+            );
+
+            CREATE TABLE IF NOT EXISTS workout_drafts (
+                profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+                day_name TEXT NOT NULL,
+                workout_date TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(profile_id, day_name)
+            );
+            """
+        )
+
+        default = conn.execute("SELECT id FROM profiles ORDER BY id LIMIT 1").fetchone()
+        if not default:
+            default_id = conn.execute(
+                "INSERT INTO profiles(name, created_at) VALUES (?, ?)",
+                ("Tobias", datetime.now().isoformat(timespec="seconds")),
+            ).lastrowid
+        else:
+            default_id = default["id"]
+
+        _migrate_local_program_profiles(conn, int(default_id))
+        if not _sqlite_column_exists(conn, "program_exercises", "start_weight_kg"):
+            conn.execute("ALTER TABLE program_exercises ADD COLUMN start_weight_kg REAL")
+        if not _sqlite_column_exists(conn, "program_exercises", "start_reps"):
+            conn.execute("ALTER TABLE program_exercises ADD COLUMN start_reps TEXT")
+        if not _sqlite_column_exists(conn, "program_exercises", "weight_step_kg"):
+            conn.execute("ALTER TABLE program_exercises ADD COLUMN weight_step_kg REAL NOT NULL DEFAULT 2.5")
+        if not _sqlite_column_exists(conn, "workouts", "profile_id"):
+            conn.execute("ALTER TABLE workouts ADD COLUMN profile_id INTEGER REFERENCES profiles(id)")
+        if not _sqlite_column_exists(conn, "workouts", "client_token"):
+            conn.execute("ALTER TABLE workouts ADD COLUMN client_token TEXT")
+        conn.execute("UPDATE workouts SET profile_id = ? WHERE profile_id IS NULL", (default_id,))
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS workouts_client_token_idx "
+            "ON workouts(client_token) WHERE client_token IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS program_profile_exercise_idx "
+            "ON program_exercises(profile_id, day_name, exercise_id)"
+        )
+
+
+def clear_data_cache() -> None:
+    st.cache_data.clear()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def list_profiles() -> list[Profile]:
+    if use_supabase():
+        rows = supabase_client().table("profiles").select("id,name").order("id").execute().data or []
+        return [Profile(int(row["id"]), row["name"]) for row in rows]
+    with db_connection() as conn:
+        rows = conn.execute("SELECT id,name FROM profiles ORDER BY id").fetchall()
+    return [Profile(int(row["id"]), row["name"]) for row in rows]
+
+
+def _ensure_exercise(name: str) -> int:
+    if use_supabase():
+        sb = supabase_client()
+        rows = sb.table("exercises").select("id").eq("name", name).limit(1).execute().data or []
+        if rows:
+            return int(rows[0]["id"])
+        return int(sb.table("exercises").insert({"name": name}).execute().data[0]["id"])
+    with db_connection() as conn:
+        conn.execute("INSERT OR IGNORE INTO exercises(name) VALUES (?)", (name,))
+        return int(conn.execute("SELECT id FROM exercises WHERE name = ?", (name,)).fetchone()["id"])
+
+
+def seed_program_for_profile(profile_id: int) -> None:
+    if use_supabase():
+        sb = supabase_client()
+        existing = (
+            sb.table("program_exercises")
+            .select("id")
+            .eq("profile_id", profile_id)
             .limit(1)
             .execute()
             .data
+            or []
         )
-        start_weight = 0.0
-        if ex and ex[0].get("cue"):
-            import re
-            m = re.search(r"(\d+(\.\d+)?)", ex[0]["cue"])
-            if m: start_weight = float(m.group(1))
-        last_weight = start_weight
+        if existing:
+            return
+        rows = []
+        for day_name, exercises in STARTER_PROGRAM.items():
+            for order, (name, sets, rep_min, rep_max) in enumerate(exercises, start=1):
+                rows.append(
+                    {
+                        "profile_id": profile_id,
+                        "day_name": day_name,
+                        "exercise_id": _ensure_exercise(name),
+                        "sort_order": order,
+                        "sets": sets,
+                        "rep_min": rep_min,
+                        "rep_max": rep_max,
+                        "weight_step_kg": default_weight_step(name),
+                        "active": True,
+                    }
+                )
+        sb.table("program_exercises").insert(rows).execute()
+        return
 
-    bump = double_progression_bump(ex_name)
+    with db_connection() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM program_exercises WHERE profile_id = ? LIMIT 1", (profile_id,)
+        ).fetchone()
+        if exists:
+            return
+        for day_name, exercises in STARTER_PROGRAM.items():
+            for order, (name, sets, rep_min, rep_max) in enumerate(exercises, start=1):
+                conn.execute("INSERT OR IGNORE INTO exercises(name) VALUES (?)", (name,))
+                exercise_id = conn.execute(
+                    "SELECT id FROM exercises WHERE name = ?", (name,)
+                ).fetchone()["id"]
+                conn.execute(
+                    """
+                    INSERT INTO program_exercises
+                        (profile_id, day_name, exercise_id, sort_order, sets, rep_min, rep_max, weight_step_kg, active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (profile_id, day_name, exercise_id, order, sets, rep_min, rep_max, default_weight_step(name)),
+                )
 
-    # två pass i rad under rep_min?
-    under_min_streak = 0
-    for h in history:
-        if h["exercise"] == ex_name:
-            if all(int(r) < rep_min for r in h["reps"]):
-                under_min_streak += 1
-            else:
-                break
-    if under_min_streak >= 2:
-        last_weight = round(last_weight * 0.95, 1)
 
-    # alla set nådde rep_max i senaste passet?
-    if last_all_sets and all(r >= rep_max for r in last_all_sets):
-        last_weight = round(last_weight + bump, 1)
+def create_profile(name: str) -> Profile:
+    clean_name = " ".join(name.strip().split())
+    if not clean_name:
+        raise ValueError("Skriv ett namn på profilen.")
+    if len(clean_name) > 40:
+        raise ValueError("Profilnamnet får vara högst 40 tecken.")
 
-    # deload v12
-    if (week_idx + 1) == 12:
-        last_weight = round(last_weight * DEFAULT_DELOAD_FACTOR, 1)
-
-    return max(last_weight, 0.0)
-
-# =========================
-# ---- Historik (för förslag)
-# =========================
-def compact_history_for_day(canon_day: str) -> List[Dict]:
-    """
-    Returnerar förenklad historik för kanoniskt dag-namn (Upper/Lower A/B):
-    [{exercise, weight, reps:[..]} ...]
-    """
-    rows = (
-        sb.from_("workouts")
-        .select("id, date, day_label, sets(*)")
-        .eq("day_label", canon_day)
-        .order("date", desc=True)
-        .limit(10)
-        .execute()
-        .data or []
-    )
-    out = []
-    for w in rows:
-        sets = w.get("sets") or []
-        per_ex: Dict[str, Dict] = {}
-        for s in sets:
-            eid = s["exercise_id"]
-            per_ex.setdefault(eid, {"weight": float(s["weight_kg"]), "reps": []})
-            per_ex[eid]["reps"].append(int(s["reps"]))
-        for eid, rec in per_ex.items():
-            ex = fetch_exercise(eid) or {}
-            out.append({
-                "exercise_id": eid,
-                "exercise": ex.get("name", eid[:8]),
-                "weight": rec["weight"],
-                "reps": rec["reps"],
-            })
-    return out
-
-# =========================
-# ---- Header ----------------
-# =========================
-today = date.today()
-
-# Global veckoväljare (styr "Idag" + deload)
-if "active_week" not in st.session_state:
-    st.session_state["active_week"] = 1  # start alltid på vecka 1
-wk = st.number_input("Vecka (1–12)", min_value=1, max_value=12, step=1,
-                     value=int(st.session_state["active_week"]), key="active_week_input")
-st.session_state["active_week"] = int(wk)
-widx = st.session_state["active_week"] - 1  # 0-index internt
-
-st.markdown(
-    f"### 💪 Gymapp  &nbsp;&nbsp; **{today.strftime('%Y-%m-%d')}** &nbsp;&nbsp; "
-    f"**Vecka {widx+1}** <span class='badge'>{phase_for_week(widx)}</span>  "
-    f"&nbsp;&nbsp; <span class='pill pill-live'>🟢 LIVE</span>",
-    unsafe_allow_html=True
-)
-
-tabs = st.tabs(["Idag", "Program", "Historik", "Export"])
-
-# =========================
-# ---- IDAG ----------------
-# =========================
-with tabs[0]:
-    st.subheader("Idag")
-
-    # Passväljare (UI) -> mappa till kanoniskt dag-namn för DB
-    if "active_day_ui" not in st.session_state:
-        st.session_state["active_day_ui"] = DAY_UI[0]
-    day_ui = st.selectbox("Dagens pass", DAY_UI, index=DAY_UI.index(st.session_state["active_day_ui"]))
-    st.session_state["active_day_ui"] = day_ui
-    day_canon = ui_to_canon[day_ui]
-
-    plan = fetch_program_for_day(widx, day_canon)
-    if not plan:
-        st.info("Inget program hittat för den här veckan/dagen. Gå till fliken **Program** och klicka ”Initiera programdata”.")
+    if use_supabase():
+        rows = supabase_client().table("profiles").insert(
+            {"name": clean_name, "created_at": datetime.now().isoformat(timespec="seconds")}
+        ).execute().data
+        profile = Profile(int(rows[0]["id"]), rows[0]["name"])
     else:
-        with st.form("today_form"):
-            collected: List[Tuple[str, str, int, List[int], float]] = []  # (exercise_id, name, sets, reps[], weight)
+        with db_connection() as conn:
+            profile_id = conn.execute(
+                "INSERT INTO profiles(name, created_at) VALUES (?, ?)",
+                (clean_name, datetime.now().isoformat(timespec="seconds")),
+            ).lastrowid
+        profile = Profile(int(profile_id), clean_name)
 
-            hist = compact_history_for_day(day_canon)
-            bests = personal_bests_map()
+    seed_program_for_profile(profile.id)
+    clear_data_cache()
+    return profile
 
-            for i, row in enumerate(plan):
-                ex = row["exercises"] or {}
-                name = ex.get("name", f"Övning {row['exercise_id'][:8]}")
-                sets_n = int(row["sets"])
-                rep_min = int(row["rep_min"])
-                rep_max = int(row["rep_max"])
 
-                suggested = propose_weight(name, rep_min, rep_max, widx, hist)
+def list_program(profile_id: int, day_name: str) -> list[ProgramExercise]:
+    if use_supabase():
+        rows = (
+            supabase_client()
+            .table("program_exercises")
+            .select("id,exercise_id,day_name,sort_order,sets,rep_min,rep_max,start_weight_kg,start_reps,weight_step_kg,exercises(name)")
+            .eq("profile_id", profile_id)
+            .eq("day_name", day_name)
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+            .data
+            or []
+        )
+        return [
+            ProgramExercise(
+                id=int(row["id"]),
+                exercise_id=int(row["exercise_id"]),
+                name=(row.get("exercises") or {}).get("name", "Okänd övning"),
+                day_name=row["day_name"],
+                sort_order=int(row["sort_order"]),
+                sets=int(row["sets"]),
+                rep_min=int(row["rep_min"]),
+                rep_max=int(row["rep_max"]),
+                start_weight_kg=float(row["start_weight_kg"]) if row.get("start_weight_kg") is not None else None,
+                start_reps=tuple(int(value) for value in (row.get("start_reps") or [])),
+                weight_step_kg=float(row.get("weight_step_kg") or 2.5),
+            )
+            for row in rows
+        ]
 
-                st.markdown(f"**{name}**  &nbsp; <span class='badge'>{rep_min}–{rep_max} reps × {sets_n} set</span>", unsafe_allow_html=True)
-                c1, c2 = st.columns([1,1])
-                with c1:
-                    weight = st.number_input("Vikt (kg)", min_value=0.0, max_value=999.0, step=0.5, value=float(suggested), key=f"w_{i}")
-                with c2:
-                    st.caption(f"Förslag: {suggested} kg")
+    with db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT pe.id, pe.exercise_id, e.name, pe.day_name, pe.sort_order,
+                   pe.sets, pe.rep_min, pe.rep_max, pe.start_weight_kg, pe.start_reps,
+                   pe.weight_step_kg
+            FROM program_exercises pe
+            JOIN exercises e ON e.id = pe.exercise_id
+            WHERE pe.profile_id = ? AND pe.day_name = ? AND pe.active = 1
+            ORDER BY pe.sort_order, e.name
+            """,
+            (profile_id, day_name),
+        ).fetchall()
+    return [
+        ProgramExercise(
+            id=int(row["id"]),
+            exercise_id=int(row["exercise_id"]),
+            name=row["name"],
+            day_name=row["day_name"],
+            sort_order=int(row["sort_order"]),
+            sets=int(row["sets"]),
+            rep_min=int(row["rep_min"]),
+            rep_max=int(row["rep_max"]),
+            start_weight_kg=float(row["start_weight_kg"]) if row["start_weight_kg"] is not None else None,
+            start_reps=tuple(int(value) for value in json.loads(row["start_reps"] or "[]")),
+            weight_step_kg=float(row["weight_step_kg"] or 2.5),
+        )
+        for row in rows
+    ]
 
-                reps_val: List[int] = []
-                for s in range(1, sets_n + 1):
-                    reps = st.number_input(f"Set {s} reps", min_value=0, max_value=50, step=1, value=rep_min, key=f"r_{i}_{s}")
-                    reps_val.append(int(reps))
 
-                collected.append((row["exercise_id"], name, sets_n, reps_val, float(weight)))
+@st.cache_data(ttl=30, show_spinner=False)
+def profile_overview(profile_id: int) -> tuple[int, str | None]:
+    if use_supabase():
+        result = (
+            supabase_client()
+            .table("workouts")
+            .select("id,day_name", count="exact")
+            .eq("profile_id", profile_id)
+            .order("workout_date", desc=True)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return int(result.count or 0), rows[0]["day_name"] if rows else None
+    with db_connection() as conn:
+        count = int(conn.execute("SELECT COUNT(*) FROM workouts WHERE profile_id = ?", (profile_id,)).fetchone()[0])
+        row = conn.execute(
+            "SELECT day_name FROM workouts WHERE profile_id = ? ORDER BY workout_date DESC, id DESC LIMIT 1",
+            (profile_id,),
+        ).fetchone()
+    return count, row["day_name"] if row else None
 
-            submitted = st.form_submit_button("💾 Spara hela passet", use_container_width=True)
-            if submitted:
-                with st.spinner("Sparar passet..."):
-                    try:
-                        # Spara workout med KANONISKT dag-namn (för kompabilitet)
-                        ins = sb.from_("workouts").insert({"date": today.isoformat(), "day_label": day_canon}).execute().data
-                        workout_id = ins[0]["id"]
 
-                        # Spara set + PR-flagga
-                        current_bests = personal_bests_map()
-                        to_insert = []
-                        pr_flags = []
-                        for ex_id, name, sets_n, reps_val, weight in collected:
-                            prev_reps = current_bests.get((ex_id, float(weight)), 0)
-                            pr_local = any(rv > prev_reps for rv in reps_val)
-                            for s_idx, rv in enumerate(reps_val, start=1):
-                                to_insert.append({
-                                    "workout_id": workout_id,
-                                    "exercise_id": ex_id,
-                                    "set_no": s_idx,
-                                    "reps": rv,
-                                    "weight_kg": weight,
-                                    "pr_flag": pr_local,
-                                })
-                            if pr_local:
-                                pr_flags.append(name)
-                        if to_insert:
-                            sb.from_("sets").insert(to_insert).execute()
+def suggested_day(profile_id: int) -> str:
+    _, last_day = profile_overview(profile_id)
+    if last_day not in DAY_NAMES:
+        return DAY_NAMES[0]
+    return DAY_NAMES[(DAY_NAMES.index(last_day) + 1) % len(DAY_NAMES)]
 
-                        if pr_flags:
-                            st.success("Pass sparat! 🎉 PB på: " + ", ".join(pr_flags))
-                        else:
-                            st.success("Pass sparat!")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Kunde inte spara: {e}")
 
-# =========================
-# ---- PROGRAM ----------------
-# =========================
-def seed_program() -> int:
-    """
-    Skapar 12 veckors program för bröstfokus, utan bänkpress, med axelpress.
-      v1–4: Hypertrofi (baseline)
-      v5–8: Hypertrofi (accessoar-variation så du inte tröttnar)
-      v9–11: Styrka (3–5 bas, 6–8 assistans, -1 set på assistans)
-      v12: Deload (~60% setvolym; vikt-sänkning sköts även av appens logik)
-    Huvudlyft hålls konstanta. Accessoarer roteras.
-    """
+@st.cache_data(ttl=30, show_spinner=False)
+def history_dataframe(profile_id: int) -> pd.DataFrame:
+    columns = ["workout_id", "set_id", "datum", "pass", "anteckning", "ovning", "exercise_id", "set_nr", "vikt_kg", "reps", "pb"]
+    if use_supabase():
+        rows = (
+            supabase_client()
+            .table("workout_sets")
+            .select(
+                "id,exercise_id,set_no,weight_kg,reps,is_pr,"
+                "workouts!inner(id,profile_id,workout_date,day_name,notes),exercises(name)"
+            )
+            .eq("workouts.profile_id", profile_id)
+            .order("id")
+            .execute()
+            .data
+            or []
+        )
+        data = []
+        for row in rows:
+            workout = row.get("workouts") or {}
+            exercise = row.get("exercises") or {}
+            data.append(
+                {
+                    "workout_id": workout.get("id"),
+                    "set_id": row.get("id"),
+                    "datum": workout.get("workout_date"),
+                    "pass": workout.get("day_name"),
+                    "anteckning": workout.get("notes") or "",
+                    "ovning": exercise.get("name"),
+                    "exercise_id": row.get("exercise_id"),
+                    "set_nr": row.get("set_no"),
+                    "vikt_kg": row.get("weight_kg"),
+                    "reps": row.get("reps"),
+                    "pb": row.get("is_pr"),
+                }
+            )
+        return pd.DataFrame(data, columns=columns)
 
-    # --- Hämta övningar
-    ex_rows = sb.from_("exercises").select("id,name").execute().data or []
-    name_to_id = {r["name"]: r["id"] for r in ex_rows}
+    with db_connection() as conn:
+        return pd.read_sql_query(
+            """
+            SELECT w.id AS workout_id, ws.id AS set_id, w.workout_date AS datum,
+                   w.day_name AS pass, w.notes AS anteckning, e.name AS ovning,
+                   ws.exercise_id, ws.set_no AS set_nr, ws.weight_kg AS vikt_kg,
+                   ws.reps, ws.is_pr AS pb
+            FROM workout_sets ws
+            JOIN workouts w ON w.id = ws.workout_id
+            JOIN exercises e ON e.id = ws.exercise_id
+            WHERE w.profile_id = ?
+            ORDER BY w.workout_date, w.id, ws.id
+            """,
+            conn,
+            params=(profile_id,),
+        )
 
-    def _resolve(name_to_id: Dict[str,str], *aliases: str) -> Optional[str]:
-        # exakt träff
-        for a in aliases:
-            if a in name_to_id:
-                return name_to_id[a]
-        # fuzzy: innehåller
-        lowmap = {k.lower(): v for k,v in name_to_id.items()}
-        for a in aliases:
-            a_low = a.lower()
-            for k,v in lowmap.items():
-                if a_low in k:
-                    return v
+
+def best_for_exercise(name: str, history: pd.DataFrame) -> tuple[float, int] | None:
+    rows = history[history["ovning"] == name]
+    if rows.empty:
         return None
+    max_weight = float(rows["vikt_kg"].max())
+    max_reps = int(rows.loc[rows["vikt_kg"].astype(float) == max_weight, "reps"].max())
+    return max_weight, max_reps
 
-    # --- Basmall (v1–4): kanoniska dag-namn
-    base_template: Dict[str, List[Tuple[str, bool, int, Tuple[str,...]]]] = {
-        # Pass 1 — Upper A (Bröst/triceps, hypertrofi)
-        "Upper A": [
-            ("Lutande hantelpress", True, 4, ("Lutande hantelpress","Lutande press")),
-            ("Kabel-flyes (hög→låg)", False, 3, ("Kabel-flyes (hög→låg)","Kabel-flyes hög","Kabel flyes hög")),
-            ("Enarms kabelpress", False, 3, ("Enarms kabelpress","Kabelpress")),
-            ("Enarms hantelrodd", False, 3, ("Enarms hantelrodd","Hantelrodd")),
-            ("Sidolyft hantlar", False, 3, ("Sidolyft hantlar","Sidolyft")),
-            ("Triceps pushdown", False, 3, ("Triceps pushdown","Pushdown")),
-        ],
-        # Pass 2 — Lower A
-        "Lower A": [
-            ("Knäböj", True, 4, ("Knäböj","Böj","Squat")),
-            ("Raka marklyft (RDL)", True, 4, ("Raka marklyft (RDL)","RDL","Raka marklyft")),
-            ("Bulgarian split squat", False, 3, ("Bulgarian split squat","Bulgarian")),
-            ("Kabel pull-through", False, 3, ("Kabel pull-through","Pull-through")),
-            ("Vadpress", False, 3, ("Vadpress","Calf raise")),
-            ("Kabel-crunch", False, 3, ("Kabel-crunch","Cable crunch")),
-        ],
-        # Pass 3 — Upper B (Bröst tungt + axlar/rygg/biceps)
-        "Upper B": [
-            ("Hantelpress plan bänk", True, 4, ("Hantelpress plan bänk","Hantelpress")),
-            ("Kabel-flyes (låg→hög)", False, 3, ("Kabel-flyes (låg→hög)","Kabel-flyes låg","Kabel flyes låg")),
-            ("Lutande kabelpress", False, 3, ("Lutande kabelpress","Kabelpress")),
-            ("Sittande kabelrodd", False, 3, ("Sittande kabelrodd","Kabelrodd")),
-            ("Face pull", False, 3, ("Face pull","Facepull")),
-            ("Axelpress hantlar", False, 3, ("Axelpress hantlar","Axelpress")),
-            ("Bicepscurl hantlar", False, 3, ("Bicepscurl hantlar","Bicepscurl")),
-        ],
-        # Pass 4 — Lower B
-        "Lower B": [
-            ("Marklyft", True, 3, ("Marklyft","Mark")),
-            ("Frontböj", True, 3, ("Frontböj","Front squat","Goblet squat","Goblet")),
-            ("Hip thrust", True, 4, ("Hip thrust","Hipthrust")),
-            ("Bakåtlunges", False, 3, ("Bakåtlunges","Lunges bak")),
-            ("Vadpress", False, 3, ("Vadpress","Calf raise")),
-            ("Kabel woodchop", False, 3, ("Kabel woodchop","Woodchop")),
-        ],
+
+def default_weight_step(name: str) -> float:
+    barbell_lower = ["knäböj", "frontböj", "marklyft", "raka marklyft"]
+    return 5.0 if any(term in name.lower() for term in barbell_lower) else 2.5
+
+
+def weight_step_for(name: str) -> float:
+    return default_weight_step(name)
+
+
+def suggest_weight(exercise: ProgramExercise, history: pd.DataFrame) -> WeightSuggestion:
+    rows = history[history["exercise_id"].astype(str) == str(exercise.exercise_id)] if not history.empty else history
+    if rows.empty:
+        if exercise.start_weight_kg is not None:
+            return WeightSuggestion(
+                exercise.start_weight_kg,
+                f"Börja på {exercise.start_weight_kg:g} kg",
+                "Startvärde från din tidigare träningslogg.",
+            )
+        return WeightSuggestion(0.0, "Välj startvikt", "Första gången du loggar övningen.")
+
+    rows = rows.sort_values(["datum", "workout_id", "set_nr"])
+    latest_workout = rows.iloc[-1]["workout_id"]
+    latest = rows[rows["workout_id"] == latest_workout].sort_values("set_nr")
+    last_weight = float(latest.iloc[-1]["vikt_kg"])
+    reps = [int(value) for value in latest["reps"].tolist()]
+    step = exercise.weight_step_kg
+
+    if len(reps) < exercise.sets:
+        return WeightSuggestion(last_weight, f"Behåll {last_weight:g} kg", "Förra loggen hade färre set än programmet.")
+    if all(rep >= exercise.rep_max for rep in reps):
+        suggested = last_weight + step
+        return WeightSuggestion(suggested, f"Höj till {suggested:g} kg", "Alla set nådde övre repmålet senast.")
+    if all(rep < exercise.rep_min for rep in reps):
+        suggested = max(0.0, last_weight - step)
+        return WeightSuggestion(suggested, f"Sänk till {suggested:g} kg", "Alla set låg under repmålet senast.")
+    return WeightSuggestion(last_weight, f"Behåll {last_weight:g} kg", f"Senast: {', '.join(map(str, reps))} reps.")
+
+
+def suggested_reps(exercise: ProgramExercise, history: pd.DataFrame) -> list[int]:
+    rows = history[history["exercise_id"].astype(str) == str(exercise.exercise_id)] if not history.empty else history
+    if rows.empty:
+        values = list(exercise.start_reps)
+    else:
+        rows = rows.sort_values(["datum", "workout_id", "set_nr"])
+        latest_workout = rows.iloc[-1]["workout_id"]
+        values = [int(value) for value in rows[rows["workout_id"] == latest_workout]["reps"].tolist()]
+    return (values + [exercise.rep_min] * exercise.sets)[: exercise.sets]
+
+
+def load_workout_draft(profile_id: int, day_name: str) -> dict | None:
+    if use_supabase():
+        rows = (
+            supabase_client()
+            .table("workout_drafts")
+            .select("workout_date,notes,payload,updated_at")
+            .eq("profile_id", profile_id)
+            .eq("day_name", day_name)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    with db_connection() as conn:
+        row = conn.execute(
+            "SELECT workout_date,notes,payload,updated_at FROM workout_drafts WHERE profile_id=? AND day_name=?",
+            (profile_id, day_name),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "workout_date": row["workout_date"],
+        "notes": row["notes"],
+        "payload": json.loads(row["payload"]),
+        "updated_at": row["updated_at"],
     }
 
-    # --- Variation (v5–8): byter några accessoarer
-    var_template: Dict[str, List[Tuple[str, bool, int, Tuple[str,...]]]] = {
-        "Upper A": [
-            ("Lutande hantelpress", True, 4, ("Lutande hantelpress","Lutande press")),
-            ("Kabel-flyes (låg→hög)", False, 3, ("Kabel-flyes (låg→hög)","Kabel-flyes låg","Kabel flyes låg")),  # swap vinkel
-            ("Lutande kabelpress", False, 3, ("Lutande kabelpress","Kabelpress")),                               # swap mot enarms kabelpress
-            ("Sittande kabelrodd", False, 3, ("Sittande kabelrodd","Kabelrodd")),                                 # swap rodd
-            ("Sidolyft hantlar", False, 3, ("Sidolyft hantlar","Sidolyft")),
-            ("Triceps pushdown", False, 3, ("Triceps pushdown","Pushdown")),
-        ],
-        "Lower A": [
-            ("Knäböj", True, 4, ("Knäböj","Böj","Squat")),
-            ("Raka marklyft (RDL)", True, 4, ("Raka marklyft (RDL)","RDL","Raka marklyft")),
-            ("Bakåtlunges", False, 3, ("Bakåtlunges","Lunges bak")),   # swap mot Bulgarian
-            ("Kabel pull-through", False, 3, ("Kabel pull-through","Pull-through")),
-            ("Vadpress", False, 3, ("Vadpress","Calf raise")),
-            ("Kabel-crunch", False, 3, ("Kabel-crunch","Cable crunch")),
-        ],
-        "Upper B": [
-            ("Hantelpress plan bänk", True, 4, ("Hantelpress plan bänk","Hantelpress")),
-            ("Kabel-flyes (hög→låg)", False, 3, ("Kabel-flyes (hög→låg)","Kabel-flyes hög","Kabel flyes hög")),  # swap vinkel
-            ("Enarms kabelpress", False, 3, ("Enarms kabelpress","Kabelpress")),                                  # swap mot lutande kabelpress
-            ("Sittande kabelrodd", False, 3, ("Sittande kabelrodd","Kabelrodd")),
-            ("Face pull", False, 3, ("Face pull","Facepull")),
-            ("Axelpress hantlar", False, 3, ("Axelpress hantlar","Axelpress")),
-            ("Bicepscurl hantlar", False, 3, ("Bicepscurl hantlar","Bicepscurl")),
-        ],
-        "Lower B": [
-            ("Marklyft", True, 3, ("Marklyft","Mark")),
-            ("Goblet squat", True, 3, ("Goblet squat","Goblet","Frontböj","Front squat")),   # swap mot Frontböj om finns
-            ("Hip thrust", True, 4, ("Hip thrust","Hipthrust")),
-            ("Bulgarian split squat", False, 3, ("Bulgarian split squat","Bulgarian")),      # swap mot bakåtlunges
-            ("Vadpress", False, 3, ("Vadpress","Calf raise")),
-            ("Kabel woodchop", False, 3, ("Kabel woodchop","Woodchop")),
-        ],
+
+def save_workout_draft(
+    profile_id: int,
+    day_name: str,
+    workout_date: date,
+    notes: str,
+    payload: list[dict],
+) -> None:
+    updated_at = datetime.now().isoformat(timespec="seconds")
+    row = {
+        "profile_id": profile_id,
+        "day_name": day_name,
+        "workout_date": workout_date.isoformat(),
+        "notes": notes,
+        "payload": payload,
+        "updated_at": updated_at,
     }
+    if use_supabase():
+        supabase_client().table("workout_drafts").upsert(
+            row, on_conflict="profile_id,day_name"
+        ).execute()
+        return
+    with db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO workout_drafts(profile_id,day_name,workout_date,notes,payload,updated_at)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(profile_id,day_name) DO UPDATE SET
+                workout_date=excluded.workout_date,
+                notes=excluded.notes,
+                payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """,
+            (
+                profile_id,
+                day_name,
+                workout_date.isoformat(),
+                notes,
+                json.dumps(payload, separators=(",", ":")),
+                updated_at,
+            ),
+        )
 
-    def _block_for_week(week: int) -> str:
-        if week <= 8: return "Hypertrofi"
-        if 9 <= week <= 11: return "Styrka"
-        return "Deload"
 
-    rows = []
-    for week in range(1, 13):
-        block = _block_for_week(week)
-        # välj mall
-        tpl = base_template if week <= 4 else (var_template if week <= 8 else var_template)
+def clear_workout_draft(profile_id: int, day_name: str) -> None:
+    if use_supabase():
+        (
+            supabase_client()
+            .table("workout_drafts")
+            .delete()
+            .eq("profile_id", profile_id)
+            .eq("day_name", day_name)
+            .execute()
+        )
+        return
+    with db_connection() as conn:
+        conn.execute(
+            "DELETE FROM workout_drafts WHERE profile_id=? AND day_name=?",
+            (profile_id, day_name),
+        )
 
-        for canon_day in DAY_CANON:
-            for name, is_base, sets_n, aliases in tpl[canon_day]:
-                ex_id = _resolve(name_to_id, *aliases) or name_to_id.get(name)
-                if not ex_id:
-                    # hoppa över om övningen inte finns i tabellen
-                    continue
 
-                # reps per block
-                if block == "Hypertrofi" or block == "Deload":
-                    rep_min, rep_max = (6,10) if is_base else (8,12)
-                else:  # Styrka
-                    rep_min, rep_max = (3,5) if is_base else (6,8)
-
-                # set-justering per block
-                sets_out = sets_n
-                if block == "Styrka" and not is_base:
-                    sets_out = max(2, sets_n - 1)  # lite lägre assistansvolym
-                if block == "Deload":
-                    # Sänk setvolym ~40% (min 2 set)
-                    calc = int(round(sets_n * 0.6))
-                    sets_out = max(2, calc)
-
-                rows.append({
-                    "week": week,
-                    "day": canon_day,     # Viktigt: behåll kanoniskt dag-namn i DB
-                    "exercise_id": ex_id,
-                    "sets": int(sets_out),
-                    "rep_min": int(rep_min),
-                    "rep_max": int(rep_max),
-                })
-
-    # Rensa och skriv in
-    sb.table("program_weeks").delete().neq("week", -1).execute()
-    if rows:
-        BATCH = 200
-        for i in range(0, len(rows), BATCH):
-            sb.table("program_weeks").insert(rows[i:i+BATCH]).execute()
-    return len(rows)
-
-with tabs[1]:
-    st.subheader("Program")
-    st.caption("v1–4 Hypertrofi • v5–8 Hypertrofi (variation) • v9–11 Styrka • v12 Deload")
-
-    # Synka med toppens veckoval
-    sel_week = st.number_input("Vecka (1–12)", min_value=1, max_value=12, step=1,
-                               value=st.session_state["active_week"], key="program_week")
-    st.session_state["active_week"] = int(sel_week)
-
-    if st.button("⚙️ Initiera programdata (12 veckor)", use_container_width=True):
-        with st.spinner("Initierar programdata..."):
-            try:
-                n = seed_program()
-                st.success(f"Programdata skapad/uppdaterad ({n} rader).")
-            except Exception as e:
-                st.error(f"Kunde inte initiera: {e}")
-
-    # Hämta veckans rader
-    plan_rows = (
-        sb.from_("program_weeks")
-        .select("*,exercises(name)")
-        .eq("week", int(sel_week))
-        .order("day", desc=False)
-        .order("exercise_id", desc=False)
-        .execute()
-        .data or []
+def workout_draft_signature(
+    workout_date: date,
+    notes: str,
+    payload: list[dict],
+) -> str:
+    return json.dumps(
+        {
+            "workout_date": workout_date.isoformat(),
+            "notes": notes,
+            "payload": payload,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
 
-    if not plan_rows:
-        st.info("Inget program hittat. Klicka ”Initiera programdata”.")
+
+def _pr_flags(exercise_id: int, weight: float, reps: list[int], history: pd.DataFrame) -> list[bool]:
+    if history.empty:
+        running_best = 0
     else:
-        # Visa dag för dag med UI-namnet "Pass X"
-        for canon_day in DAY_CANON:
-            day_rows = [r for r in plan_rows if r["day"] == canon_day]
-            if not day_rows:
-                continue
-            st.markdown(f"### {canon_to_ui[canon_day]}  <span class='badge'>{canon_day}</span>", unsafe_allow_html=True)
+        previous = history[
+            (history["exercise_id"].astype(str) == str(exercise_id))
+            & (history["vikt_kg"].astype(float) == float(weight))
+        ]
+        running_best = int(previous["reps"].max()) if not previous.empty else 0
+    flags = []
+    for rep in reps:
+        flags.append(rep > running_best)
+        running_best = max(running_best, rep)
+    return flags
 
-            with st.form(f"program_form_{canon_day}"):
-                rows_to_save = []
-                valid_form = True
-                for i, row in enumerate(day_rows):
-                    ex = row["exercises"] or {}
-                    name = ex.get("name", f"Övning {row['exercise_id'][:8]}")
-                    c1,c2,c3,c4 = st.columns([2,1,1,1])
-                    with c1: st.markdown(f"**{name}**")
-                    with c2: sets_v = st.number_input("Set", 1, 8, int(row["sets"]), key=f"pg_sets_{canon_day}_{i}")
-                    with c3: rmin_v = st.number_input("Rep min", 1, 30, int(row["rep_min"]), key=f"pg_min_{canon_day}_{i}")
-                    with c4: rmax_v = st.number_input("Rep max", 1, 30, int(row["rep_max"]), key=f"pg_max_{canon_day}_{i}")
 
-                    if rmax_v < rmin_v:
-                        st.error(f"⚠️ Rep max för {name} måste vara ≥ Rep min.", icon="🚨")
-                        valid_form = False
+def save_workout(
+    profile_id: int,
+    day_name: str,
+    workout_date: date,
+    notes: str,
+    logged: list[dict],
+    history: pd.DataFrame,
+    client_token: str | None = None,
+) -> int:
+    if not logged:
+        raise ValueError("Markera minst en övning som klar.")
 
-                    rows_to_save.append((row["exercise_id"], sets_v, rmin_v, rmax_v))
-
-                saved = st.form_submit_button("💾 Spara ändringar för detta pass", use_container_width=True)
-                if saved:
-                    if not valid_form:
-                        st.error("Korrigera fel innan du sparar.")
-                    else:
-                        with st.spinner("Sparar..."):
-                            try:
-                                for ex_id, sets_v, rmin_v, rmax_v in rows_to_save:
-                                    sb.table("program_weeks").update({
-                                        "sets": int(sets_v),
-                                        "rep_min": int(rmin_v),
-                                        "rep_max": int(rmax_v),
-                                    }).match({
-                                        "week": int(sel_week),
-                                        "day": canon_day,
-                                        "exercise_id": ex_id,
-                                    }).execute()
-                                st.success("Program uppdaterat.")
-                            except Exception as e:
-                                st.error(f"Kunde inte spara: {e}")
-
-# =========================
-# ---- HISTORIK ----------------
-# =========================
-with tabs[2]:
-    st.subheader("Historik")
-    # Filter visas som "Pass X" men matchar DB via kanoniskt namn
-    filt_ui = st.selectbox("Filtrera på pass", ["Alla"] + DAY_UI, index=0)
-    go = st.checkbox("Visa set per övning")
-
-    if st.button("🔄 Uppdatera", use_container_width=True):
-        st.experimental_rerun()
-
-    if filt_ui == "Alla":
-        with st.spinner("Hämtar data..."):
-            data = (
-                sb.from_("workouts")
-                .select("*, sets(*), exercises:sets(exercises(*))")
-                .order("date", desc=True)
-                .limit(100)
-                .execute()
-                .data or []
-            )
-    else:
-        canon = ui_to_canon[filt_ui]
-        with st.spinner("Hämtar data..."):
-            data = (
-                sb.from_("workouts")
-                .select("*, sets(*), exercises:sets(exercises(*))")
-                .eq("day_label", canon)
-                .order("date", desc=True)
-                .limit(100)
-                .execute()
-                .data or []
+    set_rows = []
+    for item in logged:
+        flags = _pr_flags(item["exercise_id"], item["weight_kg"], item["reps"], history)
+        for set_no, (reps, is_pr) in enumerate(zip(item["reps"], flags), start=1):
+            set_rows.append(
+                {
+                    "exercise_id": item["exercise_id"],
+                    "set_no": set_no,
+                    "reps": int(reps),
+                    "weight_kg": float(item["weight_kg"]),
+                    "is_pr": bool(is_pr),
+                }
             )
 
-    if not data:
-        st.info("Ingen historik ännu.")
+    now = datetime.now().isoformat(timespec="seconds")
+    token = client_token or uuid.uuid4().hex
+    if use_supabase():
+        sb = supabase_client()
+        try:
+            result = sb.rpc(
+                "save_workout_atomic",
+                {
+                    "p_profile_id": profile_id,
+                    "p_workout_date": workout_date.isoformat(),
+                    "p_day_name": day_name,
+                    "p_notes": notes.strip(),
+                    "p_sets": set_rows,
+                    "p_client_token": token,
+                },
+            ).execute()
+        except Exception as exc:
+            raise RuntimeError("Kunde inte spara passet. Databasen behöver den senaste migreringen.") from exc
+        clear_data_cache()
+        value = result.data[0] if isinstance(result.data, list) else result.data
+        return int(value)
+
+    with db_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM workouts WHERE client_token=?", (token,)
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+        workout_id = conn.execute(
+            """
+            INSERT INTO workouts(profile_id, workout_date, day_name, notes, created_at, client_token)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (profile_id, workout_date.isoformat(), day_name, notes.strip(), now, token),
+        ).lastrowid
+        conn.executemany(
+            """
+            INSERT INTO workout_sets(workout_id, exercise_id, set_no, reps, weight_kg, is_pr)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (workout_id, row["exercise_id"], row["set_no"], row["reps"], row["weight_kg"], int(row["is_pr"]))
+                for row in set_rows
+            ],
+        )
+    clear_data_cache()
+    return int(workout_id)
+
+
+def update_program_exercise(
+    row_id: int,
+    profile_id: int,
+    sets: int,
+    rep_min: int,
+    rep_max: int,
+    sort_order: int,
+    weight_step_kg: float = 2.5,
+) -> None:
+    payload = {
+        "sets": sets,
+        "rep_min": rep_min,
+        "rep_max": rep_max,
+        "sort_order": sort_order,
+        "weight_step_kg": weight_step_kg,
+    }
+    if use_supabase():
+        supabase_client().table("program_exercises").update(payload).eq("id", row_id).eq("profile_id", profile_id).execute()
     else:
-        for w in data:
-            # Visa både Pass X och kanoniskt namn
-            ui_name = canon_to_ui.get(w['day_label'], w['day_label'])
-            st.markdown(f"**{w['date']} — {ui_name}**  <span class='badge'>{w['day_label']}</span>", unsafe_allow_html=True)
-            if go:
-                for s in w.get("sets", []):
-                    ex = s.get("exercises") or {}
-                    name = ex.get("name", s['exercise_id'][:8])
-                    pr = " 🏆" if s.get("pr_flag") else ""
-                    st.write(f"- {name}: {s['weight_kg']} kg × {s['reps']} reps{pr}")
-
-# =========================
-# ---- EXPORT ----------------
-# =========================
-with tabs[3]:
-    st.subheader("Export")
-    st.caption("Ladda ner all träningsdata som CSV.")
-
-    include_pr = st.checkbox("Ta med PR-flagga", value=True)
-    if st.button("⤓ Skapa CSV", use_container_width=True):
-        with st.spinner("Hämtar data..."):
-            data = (
-                sb.from_("sets")
-                .select("*, workouts:workouts(*), exercises:exercises(*)")
-                .order("workout_id", desc=False)
-                .order("exercise_id", desc=False)
-                .order("set_no", desc=False)
-                .execute().data or []
+        with db_connection() as conn:
+            conn.execute(
+                "UPDATE program_exercises SET sets=?, rep_min=?, rep_max=?, sort_order=?, weight_step_kg=? WHERE id=? AND profile_id=?",
+                (sets, rep_min, rep_max, sort_order, weight_step_kg, row_id, profile_id),
             )
-        if not data:
-            st.warning("Inget att exportera ännu.")
+    clear_data_cache()
+
+
+def add_program_exercise(
+    profile_id: int,
+    day_name: str,
+    name: str,
+    sets: int,
+    rep_min: int,
+    rep_max: int,
+    weight_step_kg: float | None = None,
+) -> None:
+    clean_name = " ".join(name.strip().split())
+    if not clean_name:
+        raise ValueError("Skriv ett övningsnamn först.")
+    if rep_max < rep_min:
+        raise ValueError("Rep max måste vara minst lika högt som rep min.")
+    step = float(weight_step_kg or default_weight_step(clean_name))
+    exercise_id = _ensure_exercise(clean_name)
+
+    if use_supabase():
+        sb = supabase_client()
+        existing = (
+            sb.table("program_exercises")
+            .select("id")
+            .eq("profile_id", profile_id)
+            .eq("day_name", day_name)
+            .eq("exercise_id", exercise_id)
+            .limit(1)
+            .execute().data or []
+        )
+        orders = (
+            sb.table("program_exercises")
+            .select("sort_order")
+            .eq("profile_id", profile_id)
+            .eq("day_name", day_name)
+            .order("sort_order", desc=True)
+            .limit(1)
+            .execute().data or []
+        )
+        order = int(orders[0]["sort_order"]) + 1 if orders else 1
+        payload = {
+            "profile_id": profile_id,
+            "day_name": day_name,
+            "exercise_id": exercise_id,
+            "sort_order": order,
+            "sets": sets,
+            "rep_min": rep_min,
+            "rep_max": rep_max,
+            "weight_step_kg": step,
+            "active": True,
+        }
+        if existing:
+            sb.table("program_exercises").update(payload).eq("id", existing[0]["id"]).execute()
         else:
-            df = pd.DataFrame(data)
-            df["date"] = df["workouts"].apply(lambda x: x.get("date") if isinstance(x, dict) else "")
-            # Byt ut dag_label i exporten till "Pass X" för läsbarhet
-            df["day_label"] = df["workouts"].apply(lambda x: canon_to_ui.get(x.get("day_label",""), x.get("day_label","")) if isinstance(x, dict) else "")
-            df["exercise"] = df["exercises"].apply(lambda x: x.get("name") if isinstance(x, dict) else "")
-            cols = ["date","day_label","exercise","set_no","weight_kg","reps"]
-            if include_pr: cols.append("pr_flag")
-            csv = df[cols].to_csv(index=False).encode("utf-8")
-            st.download_button("⤓ Spara CSV", data=csv, file_name="gymapp_export.csv", mime="text/csv", use_container_width=True)
+            sb.table("program_exercises").insert(payload).execute()
+    else:
+        with db_connection() as conn:
+            order = int(conn.execute(
+                "SELECT COALESCE(MAX(sort_order),0)+1 FROM program_exercises WHERE profile_id=? AND day_name=?",
+                (profile_id, day_name),
+            ).fetchone()[0])
+            conn.execute(
+                """
+                INSERT INTO program_exercises(profile_id,day_name,exercise_id,sort_order,sets,rep_min,rep_max,weight_step_kg,active)
+                VALUES (?,?,?,?,?,?,?,?,1)
+                ON CONFLICT(profile_id,day_name,exercise_id) DO UPDATE SET
+                    active=1, sets=excluded.sets, rep_min=excluded.rep_min,
+                    rep_max=excluded.rep_max, weight_step_kg=excluded.weight_step_kg
+                """,
+                (profile_id, day_name, exercise_id, order, sets, rep_min, rep_max, step),
+            )
+    clear_data_cache()
+
+
+def deactivate_program_exercise(row_id: int, profile_id: int) -> None:
+    if use_supabase():
+        supabase_client().table("program_exercises").update({"active": False}).eq("id", row_id).eq("profile_id", profile_id).execute()
+    else:
+        with db_connection() as conn:
+            conn.execute("UPDATE program_exercises SET active=0 WHERE id=? AND profile_id=?", (row_id, profile_id))
+    clear_data_cache()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def recent_workouts(profile_id: int, limit: int = 20) -> list[dict]:
+    if use_supabase():
+        return (
+            supabase_client().table("workouts")
+            .select("id,workout_date,day_name,notes,workout_sets(id,set_no,reps,weight_kg,is_pr,exercises(name))")
+            .eq("profile_id", profile_id)
+            .order("workout_date", desc=True)
+            .order("id", desc=True)
+            .limit(limit)
+            .execute().data or []
+        )
+    with db_connection() as conn:
+        workouts = [dict(row) for row in conn.execute(
+            "SELECT id,workout_date,day_name,notes FROM workouts WHERE profile_id=? ORDER BY workout_date DESC,id DESC LIMIT ?",
+            (profile_id, limit),
+        ).fetchall()]
+        for workout in workouts:
+            workout["workout_sets"] = [dict(row) for row in conn.execute(
+                """
+                SELECT ws.id,ws.set_no,ws.reps,ws.weight_kg,ws.is_pr,e.name
+                FROM workout_sets ws JOIN exercises e ON e.id=ws.exercise_id
+                WHERE ws.workout_id=? ORDER BY ws.id
+                """,
+                (workout["id"],),
+            ).fetchall()]
+    return workouts
+
+
+def delete_workout(workout_id: int, profile_id: int) -> None:
+    if use_supabase():
+        supabase_client().table("workouts").delete().eq("id", workout_id).eq("profile_id", profile_id).execute()
+    else:
+        with db_connection() as conn:
+            conn.execute("DELETE FROM workouts WHERE id=? AND profile_id=?", (workout_id, profile_id))
+    clear_data_cache()
+
+
+def pb_summary_dataframe(history: pd.DataFrame) -> pd.DataFrame:
+    if history.empty:
+        return history
+    df = history.copy()
+    df["volym"] = df["vikt_kg"].astype(float) * df["reps"].astype(int)
+    df["est_1rm"] = df["vikt_kg"].astype(float) * (1 + df["reps"].astype(int) / 30)
+    summary = (
+        df.groupby("ovning", as_index=False)
+        .agg(
+            tyngsta_vikt=("vikt_kg", "max"),
+            basta_reps=("reps", "max"),
+            basta_est_1rm=("est_1rm", "max"),
+            total_volym=("volym", "sum"),
+            antal_set=("set_nr", "count"),
+        )
+        .sort_values(["basta_est_1rm", "tyngsta_vikt"], ascending=False)
+    )
+    summary["basta_est_1rm"] = summary["basta_est_1rm"].round(1)
+    summary["total_volym"] = summary["total_volym"].round(0).astype(int)
+    return summary
+
+
+def trend_dataframe(exercise_name: str, history: pd.DataFrame) -> pd.DataFrame:
+    if history.empty:
+        return history
+    df = history[history["ovning"] == exercise_name].copy()
+    if df.empty:
+        return df
+    df["est_1rm"] = df["vikt_kg"].astype(float) * (1 + df["reps"].astype(int) / 30)
+    df["volym"] = df["vikt_kg"].astype(float) * df["reps"].astype(int)
+    return (
+        df.groupby("datum", as_index=False)
+        .agg(est_1rm=("est_1rm", "max"), volym=("volym", "sum"), toppvikt=("vikt_kg", "max"))
+        .sort_values("datum")
+    )
+
+
+def technique_demo_mode(exercise_name: str) -> str | None:
+    normalized_name = " ".join(exercise_name.strip().split()).casefold()
+    exact_mode = TECHNIQUE_DEMOS.get(normalized_name)
+    if exact_mode:
+        return exact_mode
+
+    inference_rules = [
+        (("straight arm", "pulldown"), "straight_arm_pulldown"),
+        (("chest supported", "row"), "chest_supported_row"),
+        (("seated", "row"), "seated_row"),
+        (("lat", "pulldown"), "lat_pulldown"),
+        (("latsdrag",), "lat_pulldown"),
+        (("face pull",), "face_pull"),
+        (("pullup",), "pullup"),
+        (("pull up",), "pullup"),
+        (("chin up",), "chinup"),
+        (("chinup",), "chinup"),
+        (("one arm", "row"), "one_arm_row"),
+        (("enarms", "rodd"), "one_arm_row"),
+        (("row",), "seated_row"),
+        (("rodd",), "seated_row"),
+        (("incline", "press"), "incline_press"),
+        (("lutande", "press"), "incline_press"),
+        (("shoulder", "press"), "shoulder_press"),
+        (("axelpress",), "shoulder_press"),
+        (("cable", "fly"), "cable_fly"),
+        (("kabel", "fly"), "cable_fly"),
+        (("cable", "press"), "cable_press"),
+        (("leg", "press"), "leg_press"),
+        (("press",), "bench_press"),
+        (("rear delt",), "rear_delt_fly"),
+        (("lateral", "raise"), "lateral_raise"),
+        (("laterals",), "lateral_raise"),
+        (("sidolyft",), "lateral_raise"),
+        (("front", "shoulder"), "front_raise"),
+        (("front", "raise"), "front_raise"),
+        (("leg curl",), "leg_curl"),
+        (("hanging", "leg"), "hanging_leg_raise"),
+        (("leg raise",), "bench_leg_raise"),
+        (("spider", "curl"), "spider_curl"),
+        (("preacher", "curl"), "preacher_curl"),
+        (("hammer", "curl"), "hammer_curl"),
+        (("wrist", "curl"), "wrist_curl"),
+        (("biceps", "curl"), "biceps_curl"),
+        (("bicepscurl",), "biceps_curl"),
+        (("curl",), "biceps_curl"),
+        (("triceps", "pushdown"), "triceps_pushdown"),
+        (("pushdown",), "triceps_pushdown"),
+        (("overhead", "extension"), "overhead_extension"),
+        (("hip", "thrust"), "hip_thrust"),
+        (("hip", "abduction"), "hip_abduction"),
+        (("abduction",), "hip_abduction"),
+        (("calf", "raise"), "calf_raise"),
+        (("frontböj",), "front_squat"),
+        (("goblet", "squat"), "goblet_squat"),
+        (("sumo", "squat"), "sumo_squat"),
+        (("split", "squat"), "split_squat"),
+        (("squat",), "squat"),
+        (("knäböj",), "squat"),
+        (("rdl",), "rdl"),
+        (("raka", "marklyft"), "rdl"),
+        (("deadlift",), "deadlift"),
+        (("marklyft",), "deadlift"),
+        (("reverse", "lunge"), "reverse_lunge"),
+        (("bakåtlung",), "reverse_lunge"),
+        (("woodchop",), "woodchop"),
+        (("landmine", "rotation"), "landmine_rotation"),
+        (("russian", "twist"), "russian_twist"),
+        (("cable", "crunch"), "cable_crunch"),
+        (("kabel", "crunch"), "cable_crunch"),
+        (("abs", "bench"), "abs_bench"),
+        (("ab", "roller"), "ab_roller"),
+        (("hollow",), "hollow_hold"),
+        (("farmer",), "carry"),
+        (("suitcase",), "carry"),
+        (("carry",), "carry"),
+        (("push-up",), "push_up"),
+        (("pushup",), "push_up"),
+    ]
+    for terms, mode in inference_rules:
+        if all(term in normalized_name for term in terms):
+            return mode
+    return None
+
+
+def technique_demo_path(exercise_name: str) -> Path | None:
+    if not technique_demo_mode(exercise_name):
+        return None
+    path = APP_DIR / "assets" / "demos" / "exercise_3d.html"
+    return path if path.exists() else None
+
+
+def technique_demo_html(exercise_name: str) -> str | None:
+    path = technique_demo_path(exercise_name)
+    mode = technique_demo_mode(exercise_name)
+    if not path or not mode:
+        return None
+    payload = json.dumps(
+        {"name": exercise_name, "mode": mode},
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).replace("</", "<\\/")
+    return path.read_text(encoding="utf-8").replace("__DEMO_CONFIG__", payload)
+
+
+dialog_decorator = getattr(st, "dialog", None) or st.experimental_dialog
+
+
+@dialog_decorator("Utförande", width="large")
+def render_technique_dialog(exercise_name: str) -> None:
+    demo_html = technique_demo_html(exercise_name)
+    if not demo_html:
+        st.error("Det finns ingen animation för övningen ännu.")
+        return
+    st.markdown(
+        f"<div class='technique-dialog-title'>{escape(exercise_name)}</div>",
+        unsafe_allow_html=True,
+    )
+    components.html(demo_html, height=460, scrolling=False)
+
+
+def page_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        :root {
+            --ink:#111111; --muted:#69707d; --line:#dfe3ea; --paper:#f7f8fa;
+            --panel:#ffffff; --accent:#0e7c66; --gold:#c09342; --soft:#edf7f4;
+        }
+        html, body, [class*="css"] { font-family:Inter,system-ui,sans-serif; letter-spacing:0; }
+        body, [data-testid="stAppViewContainer"] {
+            background:#f5f6f8;
+            color:var(--ink);
+        }
+        .block-container { padding-top:3rem; padding-bottom:6rem; max-width:820px; }
+        [data-testid="stHeader"] { background:rgba(251,251,252,.82); backdrop-filter:blur(16px); }
+        h1,h2,h3 { letter-spacing:0; color:var(--ink); }
+        h2 { font-size:1.25rem; } h3 { font-size:1.02rem; }
+        .hero {
+            border:1px solid rgba(17,17,17,.08); border-radius:8px; padding:.8rem .9rem;
+            background:#15171a; color:white; box-shadow:0 14px 34px rgba(17,17,17,.14); margin:.7rem 0 .55rem;
+        }
+        .hero-top { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+        .hero .eyebrow { color:rgba(255,255,255,.62); font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.12rem; }
+        .hero .title { font-size:2rem; line-height:1; font-weight:800; }
+        .profile-badge { border:1px solid rgba(255,255,255,.22); border-radius:999px; padding:.36rem .62rem; color:#fff; font-size:.82rem; font-weight:800; }
+        .metric-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; margin:.65rem 0 .75rem; }
+        .overview-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .mini-card { border:1px solid var(--line); border-radius:8px; padding:.75rem .8rem; background:rgba(255,255,255,.88); box-shadow:0 10px 28px rgba(17,17,17,.05); }
+        .mini-card span { display:block; color:var(--muted); font-size:.76rem; font-weight:700; }
+        .mini-card strong { display:block; color:var(--ink); font-size:1.12rem; margin-top:.14rem; }
+        .profile-line { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.2rem 0 .8rem; }
+        .profile-name { font-weight:800; font-size:1.05rem; }
+        .suggestion { border:1px solid rgba(14,124,102,.22); background:var(--soft); border-radius:8px; padding:.7rem .78rem; margin:.45rem 0 .7rem; }
+        .suggestion strong { color:var(--accent); font-size:.96rem; }
+        .suggestion span { color:#4f5f5b; font-size:.82rem; display:block; margin-top:.12rem; }
+        .exercise-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.8rem; margin-bottom:.35rem; }
+        .exercise-title { font-weight:800; font-size:1.12rem; line-height:1.15; }
+        .hint { color:var(--muted); font-size:.88rem; margin-top:.16rem; }
+        .technique-dialog-title { color:var(--ink); font-size:1.08rem; font-weight:800; margin-bottom:.35rem; }
+        .history-row { display:grid; grid-template-columns:minmax(8rem,1fr) minmax(0,2fr); gap:.7rem; padding:.55rem 0; border-bottom:1px solid var(--line); }
+        .history-row:last-of-type { border-bottom:0; }
+        .history-row strong { color:var(--ink); font-size:.9rem; }
+        .history-row span { color:var(--muted); font-size:.88rem; text-align:right; }
+        div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:8px; border-color:rgba(17,17,17,.10); box-shadow:0 14px 34px rgba(17,17,17,.055); background:rgba(255,255,255,.9); }
+        .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button {
+            min-height:3.25rem; border-radius:8px; font-weight:800;
+            border:1px solid rgba(17,17,17,.16)!important;
+            background:#fff!important; color:#111!important; opacity:1!important;
+        }
+        .stButton>button p,[data-testid="stFormSubmitButton"] button p,.stDownloadButton button p,
+        .stButton>button span,[data-testid="stFormSubmitButton"] button span,.stDownloadButton button span {
+            color:#111!important; opacity:1!important;
+        }
+        .stButton>button:hover,[data-testid="stFormSubmitButton"] button:hover,.stDownloadButton button:hover {
+            border-color:#111!important; background:#f2f4f6!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] {
+            background:#111!important; border-color:#111!important; color:#fff!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"] p,.stButton>button[kind="primary"] p,
+        [data-testid="stFormSubmitButton"] button[kind="primary"] span,.stButton>button[kind="primary"] span {
+            color:#fff!important;
+        }
+        [data-testid="stFormSubmitButton"] button[kind="primary"]:hover,.stButton>button[kind="primary"]:hover {
+            background:#2c3035!important; border-color:#2c3035!important;
+        }
+        .stButton>button:disabled,[data-testid="stFormSubmitButton"] button:disabled,.stDownloadButton button:disabled {
+            background:#eceff2!important; border-color:#d8dde3!important; color:#7a828e!important;
+        }
+        .stButton>button:disabled p,[data-testid="stFormSubmitButton"] button:disabled p,.stDownloadButton button:disabled p {
+            color:#7a828e!important;
+        }
+        .stButton>button:focus-visible,[data-testid="stFormSubmitButton"] button:focus-visible,.stDownloadButton button:focus-visible {
+            outline:3px solid rgba(14,124,102,.28)!important; outline-offset:2px;
+        }
+        [data-testid="stExpander"] details { border:1px solid var(--line)!important; border-radius:8px!important; background:#fff!important; overflow:hidden; }
+        [data-testid="stExpander"] summary { min-height:3.2rem; background:#fff!important; color:#111!important; }
+        [data-testid="stExpander"] summary:hover { background:#f5f7f8!important; }
+        [data-testid="stExpander"] summary p,[data-testid="stExpander"] summary span,[data-testid="stExpander"] summary svg {
+            color:#111!important; fill:#111!important; opacity:1!important;
+        }
+        [data-testid="stNumberInput"] button { background:#f3f5f7!important; color:#111!important; border-color:var(--line)!important; }
+        [data-testid="stNumberInput"] button:hover { background:#e7eaee!important; }
+        [data-testid="stNumberInput"] button svg { color:#111!important; fill:#111!important; }
+        div[role="radiogroup"] { display:grid!important; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.35rem; width:100%; }
+        div[role="radiogroup"] label { width:100%; justify-content:center; border:1px solid rgba(17,17,17,.14); border-radius:999px; padding:.18rem .42rem; background:white; color:#111!important; opacity:1!important; }
+        div[role="radiogroup"] label span,div[role="radiogroup"] label p { color:#111!important; opacity:1!important; }
+        div[role="radiogroup"] label:has(input:checked) { background:#15171a!important; border-color:#15171a!important; }
+        div[role="radiogroup"] label:has(input:checked) span,div[role="radiogroup"] label:has(input:checked) p { color:#fff!important; }
+        label,.stTextInput label,.stNumberInput label,.stTextArea label,.stSelectbox label { font-weight:700!important; color:#343841!important; }
+        [data-testid="stCheckbox"] label,[data-testid="stCheckbox"] label span,[data-testid="stCheckbox"] p { color:#111!important; opacity:1!important; font-weight:800!important; }
+        input,textarea { border-radius:8px!important; background:#fff!important; color:#111!important; caret-color:#111!important; }
+        div[data-baseweb="input"],div[data-baseweb="textarea"],div[data-baseweb="select"]>div { background:#fff!important; color:#111!important; border-color:var(--line)!important; }
+        div[data-baseweb="select"] span,div[data-baseweb="select"] svg { color:#111!important; fill:#111!important; }
+        div[data-baseweb="popover"],ul[role="listbox"],li[role="option"] { background:#fff!important; color:#111!important; }
+        li[role="option"] p,li[role="option"] span { color:#111!important; opacity:1!important; }
+        [data-testid="stAlert"] p,[data-testid="stAlert"] div { opacity:1!important; }
+        @media (max-width:620px) {
+            .block-container { padding-left:.72rem; padding-right:.72rem; padding-top:3rem; }
+            .hero { padding:.7rem .78rem; margin:.45rem 0 .45rem; }
+            .hero .title { font-size:1.75rem; }
+            .profile-badge { max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            .metric-row { gap:.45rem; margin:.45rem 0 .6rem; }
+            .mini-card { padding:.58rem .65rem; }
+            .overview-metrics { grid-template-columns:1fr 1fr; }
+            .pb-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
+            .pb-metrics .mini-card { padding:.5rem; }
+            .pb-metrics .mini-card strong { font-size:.96rem; }
+            div[role="radiogroup"] { grid-template-columns:repeat(4,minmax(0,1fr)); gap:.3rem; }
+            div[role="radiogroup"] label { min-height:2.35rem; padding:.1rem .24rem; }
+            div[role="radiogroup"] label p { font-size:.78rem; }
+            .history-row { grid-template-columns:1fr; gap:.15rem; }
+            .history-row span { text-align:left; }
+            .exercise-head { align-items:flex-start; }
+            .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.4rem; }
+            [data-testid="stExpander"] summary { min-height:3.4rem; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_pending_workout_transition(profile_id: int) -> bool:
+    pending = st.session_state.pop(f"pending_workout_transition_{profile_id}", None)
+    if not pending:
+        return False
+
+    st.session_state[f"selected_day_{profile_id}"] = pending["next_day"]
+    for widget_key in pending.get("clear_keys", []):
+        st.session_state.pop(widget_key, None)
+    return True
+
+
+def hydrate_workout_draft(profile_id: int, day_name: str) -> bool:
+    marker = f"draft_loaded_{profile_id}_{day_name}"
+    if st.session_state.get(marker):
+        return False
+    st.session_state[marker] = True
+    draft = load_workout_draft(profile_id, day_name)
+    if not draft:
+        return False
+
+    draft_date = date.today()
+    try:
+        draft_date = date.fromisoformat(str(draft["workout_date"]))
+        st.session_state[f"date_{profile_id}_{day_name}"] = draft_date
+    except (KeyError, TypeError, ValueError):
+        pass
+    st.session_state[f"notes_{profile_id}_{day_name}"] = str(draft.get("notes") or "")
+    payload = draft.get("payload") or []
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    st.session_state[f"draft_signature_{profile_id}_{day_name}"] = workout_draft_signature(
+        draft_date,
+        str(draft.get("notes") or ""),
+        payload,
+    )
+    for item in payload:
+        exercise_id = int(item["exercise_id"])
+        st.session_state[f"done_{profile_id}_{exercise_id}"] = bool(item.get("done"))
+        st.session_state[f"weight_{profile_id}_{exercise_id}"] = float(item.get("weight_kg") or 0)
+        for set_index, reps in enumerate(item.get("reps") or [], start=1):
+            st.session_state[f"reps_{profile_id}_{exercise_id}_{set_index}"] = int(reps)
+    return True
+
+
+def render_today(profile: Profile) -> None:
+    workout_saved = apply_pending_workout_transition(profile.id)
+    default_day = suggested_day(profile.id)
+    key = f"selected_day_{profile.id}"
+    selected_day = st.selectbox("Pass", DAY_NAMES, index=DAY_NAMES.index(st.session_state.get(key, default_day)), key=key)
+    if workout_saved:
+        st.success("Passet är sparat.")
+    plan = list_program(profile.id, selected_day)
+    history = history_dataframe(profile.id)
+    if not plan:
+        st.info("Det finns inga övningar i det här passet.")
+        return
+    draft_restored = hydrate_workout_draft(profile.id, selected_day)
+    if draft_restored:
+        st.info("Ditt påbörjade pass har återställts.")
+
+    logged: list[dict] = []
+    draft_payload: list[dict] = []
+    with st.expander("Datum och anteckning"):
+        workout_date = st.date_input(
+            "Datum",
+            value=date.today(),
+            key=f"date_{profile.id}_{selected_day}",
+        )
+        notes = st.text_area(
+            "Anteckning",
+            placeholder="Valfritt, t.ex. sömn, energi eller skada.",
+            key=f"notes_{profile.id}_{selected_day}",
+        )
+    draft_is_dirty = workout_date != date.today() or bool(notes.strip())
+    for exercise in plan:
+        pb = best_for_exercise(exercise.name, history)
+        suggestion = suggest_weight(exercise, history)
+        rep_defaults = suggested_reps(exercise, history)
+        demo_path = technique_demo_path(exercise.name)
+        with st.container(border=True):
+            hint = f"{exercise.sets} set · {exercise.rep_min}-{exercise.rep_max} reps"
+            if pb:
+                hint += f" · PB {pb[0]:g} kg x {pb[1]}"
+            if demo_path:
+                title_col, demo_col = st.columns(
+                    [5, 1],
+                    gap="small",
+                    vertical_alignment="top",
+                )
+                with title_col:
+                    st.markdown(
+                        f"""
+                        <div class="exercise-head"><div><div class="exercise-title">{escape(exercise.name)}</div>
+                        <div class="hint">{escape(hint)}</div></div></div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with demo_col:
+                    show_demo = st.button(
+                        "▶",
+                        key=f"technique_{profile.id}_{exercise.id}",
+                        help="Visa utförande",
+                    )
+                if show_demo:
+                    render_technique_dialog(exercise.name)
+            else:
+                st.markdown(
+                    f"""
+                    <div class="exercise-head"><div><div class="exercise-title">{escape(exercise.name)}</div>
+                    <div class="hint">{escape(hint)}</div></div></div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                f"""
+                <div class="suggestion"><strong>{escape(suggestion.label)}</strong><span>{escape(suggestion.reason)}</span></div>
+                """,
+                unsafe_allow_html=True,
+            )
+            done = st.checkbox("Klar", key=f"done_{profile.id}_{exercise.id}")
+            weight = st.number_input(
+                "Vikt kg",
+                min_value=0.0,
+                max_value=500.0,
+                value=float(suggestion.weight),
+                step=0.5,
+                key=f"weight_{profile.id}_{exercise.id}",
+                help="Logga vikten som står på hanteln eller maskinen, inte summan.",
+            )
+            reps: list[int] = []
+            columns = st.columns(min(exercise.sets, 4))
+            for set_index in range(1, exercise.sets + 1):
+                with columns[(set_index - 1) % len(columns)]:
+                    reps.append(st.number_input(f"Set {set_index}", min_value=0, max_value=100, value=rep_defaults[set_index - 1], step=1, key=f"reps_{profile.id}_{exercise.id}_{set_index}"))
+        if done:
+            logged.append({"exercise_id": exercise.exercise_id, "name": exercise.name, "weight_kg": float(weight), "reps": reps})
+        draft_payload.append(
+            {
+                "exercise_id": exercise.exercise_id,
+                "done": bool(done),
+                "weight_kg": float(weight),
+                "reps": reps,
+            }
+        )
+        draft_is_dirty = draft_is_dirty or bool(done)
+        draft_is_dirty = draft_is_dirty or float(weight) != float(suggestion.weight)
+        draft_is_dirty = draft_is_dirty or reps != rep_defaults
+
+    signature_key = f"draft_signature_{profile.id}_{selected_day}"
+    current_signature = workout_draft_signature(workout_date, notes, draft_payload)
+    if draft_is_dirty and st.session_state.get(signature_key) != current_signature:
+        try:
+            save_workout_draft(
+                profile.id,
+                selected_day,
+                workout_date,
+                notes,
+                draft_payload,
+            )
+        except Exception:
+            st.warning("Utkastet kunde inte autosparas just nu. Du kan fortfarande spara passet.")
+        else:
+            st.session_state[signature_key] = current_signature
+    st.caption("Ändringar sparas automatiskt.")
+
+    submitted = st.button(
+        "Spara pass",
+        key=f"save_workout_{profile.id}_{selected_day}",
+        use_container_width=True,
+        type="primary",
+    )
+
+    if submitted:
+        token_key = f"workout_token_{profile.id}_{selected_day}"
+        client_token = st.session_state.setdefault(token_key, uuid.uuid4().hex)
+        try:
+            save_workout(
+                profile.id,
+                selected_day,
+                workout_date,
+                notes,
+                logged,
+                history,
+                client_token=client_token,
+            )
+        except Exception as exc:
+            st.error(str(exc))
+        else:
+            clear_workout_draft(profile.id, selected_day)
+            clear_keys = [f"notes_{profile.id}_{selected_day}"]
+            for exercise in plan:
+                clear_keys.extend(
+                    [
+                        f"done_{profile.id}_{exercise.id}",
+                        f"weight_{profile.id}_{exercise.id}",
+                        *[
+                            f"reps_{profile.id}_{exercise.id}_{set_index}"
+                            for set_index in range(1, exercise.sets + 1)
+                        ],
+                    ]
+                )
+            clear_keys.extend(
+                [
+                    f"date_{profile.id}_{selected_day}",
+                    f"draft_loaded_{profile.id}_{selected_day}",
+                    signature_key,
+                    token_key,
+                ]
+            )
+            st.session_state[f"pending_workout_transition_{profile.id}"] = {
+                "next_day": DAY_NAMES[(DAY_NAMES.index(selected_day) + 1) % len(DAY_NAMES)],
+                "clear_keys": clear_keys,
+            }
+            st.rerun()
+
+
+def render_program(profile: Profile) -> None:
+    selected_day = st.selectbox("Välj pass att redigera", DAY_NAMES, key=f"program_day_{profile.id}")
+    rows = list_program(profile.id, selected_day)
+    for row in rows:
+        with st.expander(f"{row.sort_order}. {row.name} · {row.sets} set · {row.rep_min}-{row.rep_max} reps"):
+            with st.form(f"edit_program_{profile.id}_{row.id}"):
+                order = st.number_input("Ordning", 1, 50, int(row.sort_order), key=f"sort_{profile.id}_{row.id}")
+                sets = st.number_input("Set", 1, 10, int(row.sets), key=f"sets_{profile.id}_{row.id}")
+                rep_min = st.number_input("Rep min", 1, 50, int(row.rep_min), key=f"min_{profile.id}_{row.id}")
+                rep_max = st.number_input("Rep max", 1, 50, int(row.rep_max), key=f"max_{profile.id}_{row.id}")
+                weight_step = st.number_input(
+                    "Viktsteg kg",
+                    0.5,
+                    20.0,
+                    float(row.weight_step_kg),
+                    step=0.5,
+                    key=f"weight_step_{profile.id}_{row.id}",
+                    help="Hur mycket appen föreslår att du höjer eller sänker.",
+                )
+                save_col, remove_col = st.columns(2)
+                with save_col:
+                    save = st.form_submit_button("Spara", use_container_width=True, type="primary")
+                with remove_col:
+                    remove = st.form_submit_button("Ta bort", use_container_width=True)
+            if save:
+                if rep_max < rep_min:
+                    st.error("Rep max måste vara minst lika högt som rep min.")
+                else:
+                    update_program_exercise(
+                        row.id,
+                        profile.id,
+                        int(sets),
+                        int(rep_min),
+                        int(rep_max),
+                        int(order),
+                        float(weight_step),
+                    )
+                    st.rerun()
+            if remove:
+                deactivate_program_exercise(row.id, profile.id)
+                st.rerun()
+
+    st.subheader("Lägg till övning")
+    with st.form(f"add_exercise_{profile.id}_{selected_day}"):
+        name = st.text_input("Övningsnamn", placeholder="T.ex. Latsdrag")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sets = st.number_input("Set", 1, 10, 3, key=f"add_sets_{profile.id}")
+        with c2:
+            rep_min = st.number_input("Rep min", 1, 50, 8, key=f"add_min_{profile.id}")
+        with c3:
+            rep_max = st.number_input("Rep max", 1, 50, 12, key=f"add_max_{profile.id}")
+        weight_step = st.number_input(
+            "Viktsteg kg",
+            0.5,
+            20.0,
+            2.5,
+            step=0.5,
+            key=f"add_step_{profile.id}",
+        )
+        add = st.form_submit_button("Lägg till", use_container_width=True, type="primary")
+    if add:
+        try:
+            add_program_exercise(
+                profile.id,
+                selected_day,
+                name,
+                int(sets),
+                int(rep_min),
+                int(rep_max),
+                float(weight_step),
+            )
+        except Exception as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+
+
+def render_personal_bests(profile: Profile) -> None:
+    summary = pb_summary_dataframe(history_dataframe(profile.id))
+    if summary.empty:
+        st.info("Spara några pass först, så bygger appen en PB-sida åt profilen.")
+        return
+    exercise_name = st.selectbox(
+        "Övning",
+        sorted(summary["ovning"].tolist()),
+        key=f"pb_exercise_{profile.id}",
+    )
+    selected = summary[summary["ovning"] == exercise_name].iloc[0]
+    st.markdown(
+        f"""
+        <div class="metric-row pb-metrics"><div class="mini-card"><span>Tyngsta vikt</span><strong>{selected['tyngsta_vikt']:g} kg</strong></div>
+        <div class="mini-card"><span>Estimerat max</span><strong>{selected['basta_est_1rm']:g} kg</strong></div>
+        <div class="mini-card"><span>Loggade set</span><strong>{int(selected['antal_set'])}</strong></div></div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Vikt jämförs inom samma övning. För hantlar loggar du vikten per hantel.")
+    visible = summary[["ovning", "tyngsta_vikt", "basta_reps", "basta_est_1rm", "antal_set"]]
+    st.dataframe(
+        visible.rename(
+            columns={
+                "ovning": "Övning",
+                "tyngsta_vikt": "Tyngsta vikt",
+                "basta_reps": "Bästa reps",
+                "basta_est_1rm": "Est. 1RM",
+                "antal_set": "Set",
+            }
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def render_charts(profile: Profile) -> None:
+    history = history_dataframe(profile.id)
+    summary = pb_summary_dataframe(history)
+    if summary.empty:
+        st.info("När profilen har sparat pass syns utvecklingen här.")
+        return
+    exercise_name = st.selectbox("Övning", summary["ovning"].tolist(), key=f"trend_exercise_{profile.id}")
+    trend = trend_dataframe(exercise_name, history)
+    chart = trend.set_index("datum")[["est_1rm","toppvikt"]].rename(columns={"est_1rm":"Est. 1RM","toppvikt":"Toppvikt"})
+    st.line_chart(chart, use_container_width=True)
+    st.bar_chart(trend.set_index("datum")[["volym"]].rename(columns={"volym":"Volym"}), use_container_width=True)
+
+
+def render_history(profile: Profile) -> None:
+    workouts = recent_workouts(profile.id)
+    if not workouts:
+        st.info("Ingen historik ännu.")
+        return
+    for workout in workouts:
+        with st.expander(f"{workout['workout_date']} · {workout['day_name']}"):
+            if workout.get("notes"):
+                st.caption(workout["notes"])
+            sets = workout.get("workout_sets") or []
+            grouped: dict[str, list[str]] = {}
+            for row in sets:
+                exercise = row.get("exercises") or {}
+                name = row.get("name") or exercise.get("name", "Okänd övning")
+                marker = " PB" if row.get("is_pr") else ""
+                grouped.setdefault(name, []).append(
+                    f"{float(row['weight_kg']):g} x {row['reps']}{marker}"
+                )
+            for name, entries in grouped.items():
+                st.markdown(
+                    f"<div class='history-row'><strong>{escape(name)}</strong><span>{escape(' · '.join(entries))}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            confirm = st.checkbox("Jag vill radera det här passet", key=f"confirm_delete_{profile.id}_{workout['id']}")
+            if st.button("Radera pass", key=f"delete_{profile.id}_{workout['id']}", disabled=not confirm, use_container_width=True):
+                delete_workout(int(workout["id"]), profile.id)
+                st.rerun()
+
+
+def render_profiles(active_profile: Profile) -> None:
+    st.caption("Profiler håller program och historik isär. Alla med appens PIN kan byta profil.")
+    for profile in list_profiles():
+        count, _ = profile_overview(profile.id)
+        info_col, action_col = st.columns([3, 2], vertical_alignment="center")
+        with info_col:
+            marker = " · aktiv" if profile.id == active_profile.id else ""
+            st.write(f"**{profile.name}** · {count} pass{marker}")
+        with action_col:
+            if profile.id != active_profile.id and st.button(
+                f"Byt till {profile.name}",
+                key=f"activate_profile_{profile.id}",
+                use_container_width=True,
+            ):
+                st.session_state["pending_profile_id"] = profile.id
+                st.rerun()
+    st.subheader("Ny profil")
+    with st.form("create_profile"):
+        name = st.text_input("Namn", placeholder="T.ex. Erik")
+        submitted = st.form_submit_button("Skapa profil", use_container_width=True, type="primary")
+    if submitted:
+        try:
+            profile = create_profile(name)
+        except Exception as exc:
+            st.error(str(exc))
+        else:
+            st.session_state["pending_profile_id"] = profile.id
+            st.session_state["created_profile_name"] = profile.name
+            st.rerun()
+
+
+def render_export(profile: Profile) -> None:
+    df = history_dataframe(profile.id)
+    if df.empty:
+        st.info("Det finns inget att exportera ännu.")
+        return
+    visible = df[["datum","pass","ovning","set_nr","vikt_kg","reps","pb"]]
+    st.dataframe(visible, use_container_width=True, hide_index=True)
+    st.download_button("Ladda ner CSV", data=visible.to_csv(index=False).encode("utf-8"), file_name=f"lyftlogg-{profile.name.lower()}.csv", mime="text/csv", use_container_width=True)
+
+
+def main() -> None:
+    st.set_page_config(page_title="Lyftlogg", page_icon="🏋️", layout="centered")
+    page_styles()
+    require_secure_configuration()
+    require_pin_if_configured()
+    init_db()
+
+    try:
+        profiles = list_profiles()
+    except Exception:
+        st.error("Databasen kunde inte läsas med den säkra anslutningen.")
+        st.caption("Kontrollera Streamlit Secrets och kör supabase_migration_hardening_v5.sql.")
+        st.stop()
+
+    if not profiles:
+        profile = create_profile("Tobias")
+        profiles = [profile]
+
+    created_profile_name = st.session_state.pop("created_profile_name", None)
+    if created_profile_name:
+        st.success(f"Profilen {created_profile_name} är skapad med ett eget startprogram.")
+
+    profile_ids = [profile.id for profile in profiles]
+    pending_profile_id = st.session_state.pop("pending_profile_id", None)
+    if pending_profile_id in profile_ids:
+        st.session_state["profile_id"] = pending_profile_id
+        st.session_state["active_view"] = "Idag"
+    selected_id = st.session_state.get("profile_id", profile_ids[0])
+    if selected_id not in profile_ids:
+        selected_id = profile_ids[0]
+    profile = next(profile for profile in profiles if profile.id == selected_id)
+    st.session_state["profile_id"] = profile.id
+    initialized_profiles = st.session_state.setdefault("initialized_profiles", [])
+    if profile.id not in initialized_profiles:
+        seed_program_for_profile(profile.id)
+        initialized_profiles.append(profile.id)
+
+    workout_count, _ = profile_overview(profile.id)
+    st.markdown(
+        f"""
+        <div class='hero'><div class='hero-top'><div class='title'>Lyftlogg</div><div class='profile-badge'>{escape(profile.name)}</div></div></div>
+        <div class="metric-row overview-metrics"><div class="mini-card"><span>Träningspass</span><strong>{workout_count}</strong></div>
+        <div class="mini-card"><span>Nästa pass</span><strong>{suggested_day(profile.id)}</strong></div></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    view = st.radio("Vy", VIEWS, horizontal=True, label_visibility="collapsed", key="active_view")
+    if view == "Idag":
+        render_today(profile)
+    elif view == "Program":
+        render_program(profile)
+    elif view == "PB":
+        render_personal_bests(profile)
+    elif view == "Trend":
+        render_charts(profile)
+    elif view == "Historik":
+        render_history(profile)
+    elif view == "Profiler":
+        render_profiles(profile)
+    else:
+        render_export(profile)
+
+
+if __name__ == "__main__":
+    main()
