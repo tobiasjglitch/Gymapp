@@ -1403,7 +1403,8 @@ def page_styles() -> None:
         [data-testid="stNumberInput"] button svg { color:#111!important; fill:#111!important; }
         div[role="radiogroup"] { display:grid!important; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.28rem; width:100%; margin-bottom:.15rem; }
         div[role="radiogroup"] label { width:100%; min-height:2.25rem; justify-content:center; border:1px solid rgba(16,21,18,.12); border-radius:999px; padding:.1rem .32rem; background:white; color:var(--ink)!important; opacity:1!important; }
-        div[role="radiogroup"] label > div:first-child { display:none!important; }
+        div[role="radiogroup"] label > div:first-child,
+        label[data-testid="stRadioOption"] > div > div:first-child { display:none!important; }
         div[role="radiogroup"] label span,div[role="radiogroup"] label p { color:#111!important; opacity:1!important; }
         div[role="radiogroup"] label:has(input:checked) { background:var(--accent)!important; border-color:var(--accent)!important; box-shadow:0 5px 14px rgba(13,128,102,.16); }
         div[role="radiogroup"] label:has(input:checked) span,div[role="radiogroup"] label:has(input:checked) p { color:#fff!important; }
@@ -1433,11 +1434,22 @@ def page_styles() -> None:
             div[role="radiogroup"] label p { font-size:.74rem; }
             .suggestion { display:block; }
             .suggestion span { display:block; text-align:left; margin-top:.08rem; }
-            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {
+            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"],
+            div[data-testid="stVerticalBlock"]:has(.exercise-title) [data-testid="stHorizontalBlock"] {
                 flex-wrap:nowrap!important; gap:.4rem!important;
             }
-            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] > [data-testid="column"],
+            div[data-testid="stHorizontalBlock"]:has([class*="st-key-reps_"]) > [data-testid="stColumn"] {
                 min-width:0!important; width:auto!important;
+            }
+            div[data-testid="stHorizontalBlock"]:has([class*="st-key-reps_"]) > [data-testid="stColumn"] {
+                flex:1 1 0!important; width:0!important;
+            }
+            div[data-testid="stHorizontalBlock"]:has([class*="st-key-reps_"]) [data-testid="stNumberInput"] button {
+                flex:0 0 1.65rem!important; min-width:1.65rem!important; width:1.65rem!important; padding:0!important;
+            }
+            div[data-testid="stHorizontalBlock"]:has([class*="st-key-reps_"]) [data-testid="stNumberInputField"] {
+                min-width:0!important; padding-left:.45rem!important; padding-right:.2rem!important;
             }
             .history-row { grid-template-columns:1fr; gap:.15rem; }
             .history-row span { text-align:left; }
