@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sqlite3
@@ -24,6 +25,7 @@ except Exception:  # Supabase is only required in cloud mode.
 
 APP_DIR = Path(__file__).parent
 DB_PATH = APP_DIR / "gymapp.db"
+LOGO_PATH = APP_DIR / "assets" / "lyftlogg-mark-dark.svg"
 DAY_NAMES = ["Pass 1", "Pass 2", "Pass 3", "Pass 4"]
 VIEWS = ["Idag", "Program", "PB", "Trend", "Historik", "Profiler", "Export"]
 TECHNIQUE_DEMOS = {
@@ -239,20 +241,47 @@ def require_secure_configuration() -> None:
     st.stop()
 
 
+def logo_data_uri() -> str:
+    payload = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/svg+xml;base64,{payload}"
+
+
+def render_brand_header(
+    profile_name: str,
+    workout_count: int | None = None,
+    next_day: str | None = None,
+) -> None:
+    stats = ""
+    if workout_count is not None and next_day is not None:
+        stats = f"""
+        <div class="hero-stats">
+            <div><span>Träningspass</span><strong>{workout_count}</strong></div>
+            <div><span>Nästa pass</span><strong>{escape(next_day)}</strong></div>
+        </div>
+        """
+    st.markdown(
+        f"""
+        <div class="hero">
+            <div class="hero-top">
+                <div class="brand-lockup">
+                    <div class="brand-mark"><img src="{logo_data_uri()}" alt=""></div>
+                    <div class="brand-name"><span>LYFT</span><span>LOGG</span></div>
+                </div>
+                <div class="profile-badge">{escape(profile_name)}</div>
+            </div>
+            {stats}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def require_pin_if_configured() -> None:
     pin = app_pin()
     if not pin or st.session_state.get("unlocked"):
         return
 
-    st.markdown(
-        """
-        <div class="hero login-hero">
-            <div class="eyebrow">Privat app</div>
-            <div class="title">Lyftlogg</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    render_brand_header("Privat")
     typed = st.text_input("PIN", type="password", placeholder="Ange din PIN")
     if st.button("Lås upp", use_container_width=True, type="primary"):
         if typed == pin:
@@ -1284,51 +1313,58 @@ def page_styles() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap');
         :root {
-            --ink:#111111; --muted:#69707d; --line:#dfe3ea; --paper:#f7f8fa;
-            --panel:#ffffff; --accent:#0e7c66; --gold:#c09342; --soft:#edf7f4;
+            --ink:#101512; --muted:#66706a; --line:#dce3de; --paper:#f3f6f3;
+            --panel:#ffffff; --accent:#0d8066; --signal:#c7f36b; --blue:#7fb9ff;
+            --soft:#eaf6f1; --dark:#111713;
         }
-        html, body, [class*="css"] { font-family:Inter,system-ui,sans-serif; letter-spacing:0; }
+        html, body, [class*="css"] { font-family:Manrope,system-ui,sans-serif; letter-spacing:0; }
         body, [data-testid="stAppViewContainer"] {
-            background:#f5f6f8;
+            background:var(--paper);
             color:var(--ink);
         }
-        .block-container { padding-top:3rem; padding-bottom:6rem; max-width:820px; }
-        [data-testid="stHeader"] { background:rgba(251,251,252,.82); backdrop-filter:blur(16px); }
+        .block-container { padding-top:2.55rem; padding-bottom:4.5rem; max-width:760px; }
+        [data-testid="stHeader"] { background:rgba(243,246,243,.86); backdrop-filter:blur(18px); }
         h1,h2,h3 { letter-spacing:0; color:var(--ink); }
-        h2 { font-size:1.25rem; } h3 { font-size:1.02rem; }
+        h2 { font-size:1.18rem; } h3 { font-size:1rem; }
         .hero {
-            border:1px solid rgba(17,17,17,.08); border-radius:8px; padding:.8rem .9rem;
-            background:#15171a; color:white; box-shadow:0 14px 34px rgba(17,17,17,.14); margin:.7rem 0 .55rem;
+            border:1px solid rgba(255,255,255,.06); border-radius:8px; padding:.7rem .76rem .64rem;
+            background:var(--dark); color:white; box-shadow:0 12px 30px rgba(16,21,18,.16); margin:.35rem 0 .5rem;
         }
-        .hero-top { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
-        .hero .eyebrow { color:rgba(255,255,255,.62); font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.12rem; }
-        .hero .title { font-size:2rem; line-height:1; font-weight:800; }
-        .profile-badge { border:1px solid rgba(255,255,255,.22); border-radius:999px; padding:.36rem .62rem; color:#fff; font-size:.82rem; font-weight:800; }
-        .metric-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.65rem; margin:.65rem 0 .75rem; }
-        .overview-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
-        .mini-card { border:1px solid var(--line); border-radius:8px; padding:.75rem .8rem; background:rgba(255,255,255,.88); box-shadow:0 10px 28px rgba(17,17,17,.05); }
+        .hero-top { display:flex; align-items:center; justify-content:space-between; gap:.8rem; }
+        .brand-lockup { display:flex; align-items:center; gap:.58rem; min-width:0; }
+        .brand-mark { width:2.3rem; height:2.3rem; border-radius:7px; background:var(--signal); display:grid; place-items:center; flex:none; }
+        .brand-mark img { width:1.65rem; height:1.65rem; display:block; }
+        .brand-name { color:#fff; font-size:1.12rem; line-height:1; font-weight:800; display:flex; }
+        .brand-name span:last-child { color:rgba(255,255,255,.58); }
+        .profile-badge { border:1px solid rgba(255,255,255,.2); border-radius:999px; padding:.32rem .58rem; color:#fff; font-size:.78rem; font-weight:800; }
+        .hero-stats { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; border-top:1px solid rgba(255,255,255,.1); margin-top:.58rem; padding-top:.55rem; }
+        .hero-stats div { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; min-width:0; }
+        .hero-stats span { color:rgba(255,255,255,.58); font-size:.7rem; font-weight:700; }
+        .hero-stats strong { color:#fff; font-size:.92rem; white-space:nowrap; }
+        .metric-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; margin:.5rem 0 .62rem; }
+        .mini-card { border:1px solid var(--line); border-radius:8px; padding:.58rem .65rem; background:rgba(255,255,255,.92); box-shadow:0 7px 20px rgba(16,21,18,.045); }
         .mini-card span { display:block; color:var(--muted); font-size:.76rem; font-weight:700; }
-        .mini-card strong { display:block; color:var(--ink); font-size:1.12rem; margin-top:.14rem; }
+        .mini-card strong { display:block; color:var(--ink); font-size:1.04rem; margin-top:.1rem; }
         .profile-line { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin:.2rem 0 .8rem; }
         .profile-name { font-weight:800; font-size:1.05rem; }
-        .suggestion { border:1px solid rgba(14,124,102,.22); background:var(--soft); border-radius:8px; padding:.7rem .78rem; margin:.45rem 0 .7rem; }
-        .suggestion strong { color:var(--accent); font-size:.96rem; }
-        .suggestion span { color:#4f5f5b; font-size:.82rem; display:block; margin-top:.12rem; }
-        .exercise-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.8rem; margin-bottom:.35rem; }
-        .exercise-title { font-weight:800; font-size:1.12rem; line-height:1.15; }
-        .hint { color:var(--muted); font-size:.88rem; margin-top:.16rem; }
+        .suggestion { border:1px solid rgba(13,128,102,.2); background:var(--soft); border-radius:7px; padding:.5rem .62rem; margin:.34rem 0 .5rem; display:flex; align-items:baseline; justify-content:space-between; gap:.65rem; }
+        .suggestion strong { color:var(--accent); font-size:.86rem; flex:none; }
+        .suggestion span { color:#50615a; font-size:.76rem; margin:0; text-align:right; }
+        .exercise-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.7rem; margin-bottom:.22rem; }
+        .exercise-title { font-weight:800; font-size:1.03rem; line-height:1.15; }
+        .hint { color:var(--muted); font-size:.8rem; margin-top:.12rem; }
         .technique-dialog-title { color:var(--ink); font-size:1.08rem; font-weight:800; margin-bottom:.35rem; }
-        .history-row { display:grid; grid-template-columns:minmax(8rem,1fr) minmax(0,2fr); gap:.7rem; padding:.55rem 0; border-bottom:1px solid var(--line); }
+        .history-row { display:grid; grid-template-columns:minmax(8rem,1fr) minmax(0,2fr); gap:.65rem; padding:.44rem 0; border-bottom:1px solid var(--line); }
         .history-row:last-of-type { border-bottom:0; }
         .history-row strong { color:var(--ink); font-size:.9rem; }
         .history-row span { color:var(--muted); font-size:.88rem; text-align:right; }
-        div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:8px; border-color:rgba(17,17,17,.10); box-shadow:0 14px 34px rgba(17,17,17,.055); background:rgba(255,255,255,.9); }
+        div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:8px; border-color:var(--line); box-shadow:0 8px 24px rgba(16,21,18,.045); background:rgba(255,255,255,.94); }
         .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button {
-            min-height:3.25rem; border-radius:8px; font-weight:800;
+            min-height:2.9rem; border-radius:8px; font-weight:800;
             border:1px solid rgba(17,17,17,.16)!important;
-            background:#fff!important; color:#111!important; opacity:1!important;
+            background:#fff!important; color:var(--ink)!important; opacity:1!important;
         }
         .stButton>button p,[data-testid="stFormSubmitButton"] button p,.stDownloadButton button p,
         .stButton>button span,[data-testid="stFormSubmitButton"] button span,.stDownloadButton button span {
@@ -1338,14 +1374,14 @@ def page_styles() -> None:
             border-color:#111!important; background:#f2f4f6!important;
         }
         [data-testid="stFormSubmitButton"] button[kind="primary"],.stButton>button[kind="primary"] {
-            background:#111!important; border-color:#111!important; color:#fff!important;
+            background:var(--accent)!important; border-color:var(--accent)!important; color:#fff!important;
         }
         [data-testid="stFormSubmitButton"] button[kind="primary"] p,.stButton>button[kind="primary"] p,
         [data-testid="stFormSubmitButton"] button[kind="primary"] span,.stButton>button[kind="primary"] span {
             color:#fff!important;
         }
         [data-testid="stFormSubmitButton"] button[kind="primary"]:hover,.stButton>button[kind="primary"]:hover {
-            background:#2c3035!important; border-color:#2c3035!important;
+            background:#096d56!important; border-color:#096d56!important;
         }
         .stButton>button:disabled,[data-testid="stFormSubmitButton"] button:disabled,.stDownloadButton button:disabled {
             background:#eceff2!important; border-color:#d8dde3!important; color:#7a828e!important;
@@ -1357,7 +1393,7 @@ def page_styles() -> None:
             outline:3px solid rgba(14,124,102,.28)!important; outline-offset:2px;
         }
         [data-testid="stExpander"] details { border:1px solid var(--line)!important; border-radius:8px!important; background:#fff!important; overflow:hidden; }
-        [data-testid="stExpander"] summary { min-height:3.2rem; background:#fff!important; color:#111!important; }
+        [data-testid="stExpander"] summary { min-height:2.9rem; background:#fff!important; color:var(--ink)!important; }
         [data-testid="stExpander"] summary:hover { background:#f5f7f8!important; }
         [data-testid="stExpander"] summary p,[data-testid="stExpander"] summary span,[data-testid="stExpander"] summary svg {
             color:#111!important; fill:#111!important; opacity:1!important;
@@ -1365,10 +1401,11 @@ def page_styles() -> None:
         [data-testid="stNumberInput"] button { background:#f3f5f7!important; color:#111!important; border-color:var(--line)!important; }
         [data-testid="stNumberInput"] button:hover { background:#e7eaee!important; }
         [data-testid="stNumberInput"] button svg { color:#111!important; fill:#111!important; }
-        div[role="radiogroup"] { display:grid!important; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.35rem; width:100%; }
-        div[role="radiogroup"] label { width:100%; justify-content:center; border:1px solid rgba(17,17,17,.14); border-radius:999px; padding:.18rem .42rem; background:white; color:#111!important; opacity:1!important; }
+        div[role="radiogroup"] { display:grid!important; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.28rem; width:100%; margin-bottom:.15rem; }
+        div[role="radiogroup"] label { width:100%; min-height:2.25rem; justify-content:center; border:1px solid rgba(16,21,18,.12); border-radius:999px; padding:.1rem .32rem; background:white; color:var(--ink)!important; opacity:1!important; }
+        div[role="radiogroup"] label > div:first-child { display:none!important; }
         div[role="radiogroup"] label span,div[role="radiogroup"] label p { color:#111!important; opacity:1!important; }
-        div[role="radiogroup"] label:has(input:checked) { background:#15171a!important; border-color:#15171a!important; }
+        div[role="radiogroup"] label:has(input:checked) { background:var(--accent)!important; border-color:var(--accent)!important; box-shadow:0 5px 14px rgba(13,128,102,.16); }
         div[role="radiogroup"] label:has(input:checked) span,div[role="radiogroup"] label:has(input:checked) p { color:#fff!important; }
         label,.stTextInput label,.stNumberInput label,.stTextArea label,.stSelectbox label { font-weight:700!important; color:#343841!important; }
         [data-testid="stCheckbox"] label,[data-testid="stCheckbox"] label span,[data-testid="stCheckbox"] p { color:#111!important; opacity:1!important; font-weight:800!important; }
@@ -1379,24 +1416,34 @@ def page_styles() -> None:
         li[role="option"] p,li[role="option"] span { color:#111!important; opacity:1!important; }
         [data-testid="stAlert"] p,[data-testid="stAlert"] div { opacity:1!important; }
         @media (max-width:620px) {
-            .block-container { padding-left:.72rem; padding-right:.72rem; padding-top:3rem; }
-            .hero { padding:.7rem .78rem; margin:.45rem 0 .45rem; }
-            .hero .title { font-size:1.75rem; }
+            .block-container { padding-left:.68rem; padding-right:.68rem; padding-top:2.45rem; padding-bottom:3.5rem; }
+            .hero { padding:.62rem .68rem .58rem; margin:.25rem 0 .4rem; }
+            .brand-mark { width:2.15rem; height:2.15rem; }
+            .brand-mark img { width:1.5rem; height:1.5rem; }
+            .brand-name { font-size:1.02rem; }
             .profile-badge { max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-            .metric-row { gap:.45rem; margin:.45rem 0 .6rem; }
-            .mini-card { padding:.58rem .65rem; }
-            .overview-metrics { grid-template-columns:1fr 1fr; }
+            .hero-stats { margin-top:.48rem; padding-top:.45rem; }
+            .metric-row { gap:.4rem; margin:.4rem 0 .5rem; }
+            .mini-card { padding:.5rem .55rem; }
             .pb-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
-            .pb-metrics .mini-card { padding:.5rem; }
-            .pb-metrics .mini-card strong { font-size:.96rem; }
+            .pb-metrics .mini-card { padding:.44rem; }
+            .pb-metrics .mini-card strong { font-size:.9rem; }
             div[role="radiogroup"] { grid-template-columns:repeat(4,minmax(0,1fr)); gap:.3rem; }
-            div[role="radiogroup"] label { min-height:2.35rem; padding:.1rem .24rem; }
-            div[role="radiogroup"] label p { font-size:.78rem; }
+            div[role="radiogroup"] label { min-height:2.15rem; padding:.06rem .2rem; }
+            div[role="radiogroup"] label p { font-size:.74rem; }
+            .suggestion { display:block; }
+            .suggestion span { display:block; text-align:left; margin-top:.08rem; }
+            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {
+                flex-wrap:nowrap!important; gap:.4rem!important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+                min-width:0!important; width:auto!important;
+            }
             .history-row { grid-template-columns:1fr; gap:.15rem; }
             .history-row span { text-align:left; }
             .exercise-head { align-items:flex-start; }
-            .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3.4rem; }
-            [data-testid="stExpander"] summary { min-height:3.4rem; }
+            .stButton>button,[data-testid="stFormSubmitButton"] button,.stDownloadButton button { min-height:3rem; }
+            [data-testid="stExpander"] summary { min-height:3rem; }
         }
         </style>
         """,
@@ -1523,16 +1570,19 @@ def render_today(profile: Profile) -> None:
                 """,
                 unsafe_allow_html=True,
             )
-            done = st.checkbox("Klar", key=f"done_{profile.id}_{exercise.id}")
-            weight = st.number_input(
-                "Vikt kg",
-                min_value=0.0,
-                max_value=500.0,
-                value=float(suggestion.weight),
-                step=0.5,
-                key=f"weight_{profile.id}_{exercise.id}",
-                help="Logga vikten som står på hanteln eller maskinen, inte summan.",
-            )
+            done_col, weight_col = st.columns([1, 1.8], vertical_alignment="bottom")
+            with done_col:
+                done = st.checkbox("Klar", key=f"done_{profile.id}_{exercise.id}")
+            with weight_col:
+                weight = st.number_input(
+                    "Vikt kg",
+                    min_value=0.0,
+                    max_value=500.0,
+                    value=float(suggestion.weight),
+                    step=0.5,
+                    key=f"weight_{profile.id}_{exercise.id}",
+                    help="Logga vikten som står på hanteln eller maskinen, inte summan.",
+                )
             reps: list[int] = []
             columns = st.columns(min(exercise.sets, 4))
             for set_index in range(1, exercise.sets + 1):
@@ -1662,25 +1712,25 @@ def render_program(profile: Profile) -> None:
                 deactivate_program_exercise(row.id, profile.id)
                 st.rerun()
 
-    st.subheader("Lägg till övning")
-    with st.form(f"add_exercise_{profile.id}_{selected_day}"):
-        name = st.text_input("Övningsnamn", placeholder="T.ex. Latsdrag")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            sets = st.number_input("Set", 1, 10, 3, key=f"add_sets_{profile.id}")
-        with c2:
-            rep_min = st.number_input("Rep min", 1, 50, 8, key=f"add_min_{profile.id}")
-        with c3:
-            rep_max = st.number_input("Rep max", 1, 50, 12, key=f"add_max_{profile.id}")
-        weight_step = st.number_input(
-            "Viktsteg kg",
-            0.5,
-            20.0,
-            2.5,
-            step=0.5,
-            key=f"add_step_{profile.id}",
-        )
-        add = st.form_submit_button("Lägg till", use_container_width=True, type="primary")
+    with st.expander("Lägg till övning"):
+        with st.form(f"add_exercise_{profile.id}_{selected_day}"):
+            name = st.text_input("Övningsnamn", placeholder="T.ex. Latsdrag")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sets = st.number_input("Set", 1, 10, 3, key=f"add_sets_{profile.id}")
+            with c2:
+                rep_min = st.number_input("Rep min", 1, 50, 8, key=f"add_min_{profile.id}")
+            with c3:
+                rep_max = st.number_input("Rep max", 1, 50, 12, key=f"add_max_{profile.id}")
+            weight_step = st.number_input(
+                "Viktsteg kg",
+                0.5,
+                20.0,
+                2.5,
+                step=0.5,
+                key=f"add_step_{profile.id}",
+            )
+            add = st.form_submit_button("Lägg till", use_container_width=True, type="primary")
     if add:
         try:
             add_program_exercise(
@@ -1743,8 +1793,18 @@ def render_charts(profile: Profile) -> None:
     exercise_name = st.selectbox("Övning", summary["ovning"].tolist(), key=f"trend_exercise_{profile.id}")
     trend = trend_dataframe(exercise_name, history)
     chart = trend.set_index("datum")[["est_1rm","toppvikt"]].rename(columns={"est_1rm":"Est. 1RM","toppvikt":"Toppvikt"})
-    st.line_chart(chart, use_container_width=True)
-    st.bar_chart(trend.set_index("datum")[["volym"]].rename(columns={"volym":"Volym"}), use_container_width=True)
+    st.line_chart(
+        chart,
+        use_container_width=True,
+        height=230,
+        color=["#0d8066", "#7fb9ff"],
+    )
+    st.bar_chart(
+        trend.set_index("datum")[["volym"]].rename(columns={"volym":"Volym"}),
+        use_container_width=True,
+        height=190,
+        color="#7fb9ff",
+    )
 
 
 def render_history(profile: Profile) -> None:
@@ -1792,10 +1852,10 @@ def render_profiles(active_profile: Profile) -> None:
             ):
                 st.session_state["pending_profile_id"] = profile.id
                 st.rerun()
-    st.subheader("Ny profil")
-    with st.form("create_profile"):
-        name = st.text_input("Namn", placeholder="T.ex. Erik")
-        submitted = st.form_submit_button("Skapa profil", use_container_width=True, type="primary")
+    with st.expander("Ny profil"):
+        with st.form("create_profile"):
+            name = st.text_input("Namn", placeholder="T.ex. Erik")
+            submitted = st.form_submit_button("Skapa profil", use_container_width=True, type="primary")
     if submitted:
         try:
             profile = create_profile(name)
@@ -1818,7 +1878,7 @@ def render_export(profile: Profile) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Lyftlogg", page_icon="🏋️", layout="centered")
+    st.set_page_config(page_title="Lyftlogg", page_icon=str(LOGO_PATH), layout="centered")
     page_styles()
     require_secure_configuration()
     require_pin_if_configured()
@@ -1855,14 +1915,7 @@ def main() -> None:
         initialized_profiles.append(profile.id)
 
     workout_count, _ = profile_overview(profile.id)
-    st.markdown(
-        f"""
-        <div class='hero'><div class='hero-top'><div class='title'>Lyftlogg</div><div class='profile-badge'>{escape(profile.name)}</div></div></div>
-        <div class="metric-row overview-metrics"><div class="mini-card"><span>Träningspass</span><strong>{workout_count}</strong></div>
-        <div class="mini-card"><span>Nästa pass</span><strong>{suggested_day(profile.id)}</strong></div></div>
-        """,
-        unsafe_allow_html=True,
-    )
+    render_brand_header(profile.name, workout_count, suggested_day(profile.id))
 
     view = st.radio("Vy", VIEWS, horizontal=True, label_visibility="collapsed", key="active_view")
     if view == "Idag":

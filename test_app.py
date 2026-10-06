@@ -215,6 +215,10 @@ class LocalProfileTests(unittest.TestCase):
         )
         self.assertIn("#lat-pulldown-status[hidden]", legacy_demo)
 
+    def test_brand_logo_asset_can_be_embedded(self):
+        self.assertTrue(app.LOGO_PATH.is_file())
+        self.assertTrue(app.logo_data_uri().startswith("data:image/svg+xml;base64,"))
+
     def test_all_current_program_exercises_have_technique_demos(self):
         tobias_exercises = [
             name
@@ -348,6 +352,9 @@ app.main()
             self.assertEqual(len(tested_app.exception), 0)
             self.assertFalse(any("Agenttestövning" in row.label for row in tested_app.expander))
 
+            # Re-open the app after removing a dynamic expander. Streamlit's
+            # AppTest tree otherwise retains the deleted form's widget ids.
+            tested_app = self._app_with_history(db_path)
             tested_app.radio[0].set_value("PB").run()
             self.assertEqual(len(tested_app.dataframe), 1)
             tested_app.radio[0].set_value("Trend").run()
