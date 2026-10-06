@@ -1439,6 +1439,7 @@ def page_styles() -> None:
                 flex-wrap:nowrap!important; gap:.4rem!important;
             }
             div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] > [data-testid="column"],
+            div[data-testid="stVerticalBlock"]:has(.exercise-title) [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
             div[data-testid="stHorizontalBlock"]:has([class*="st-key-reps_"]) > [data-testid="stColumn"] {
                 min-width:0!important; width:auto!important;
             }
