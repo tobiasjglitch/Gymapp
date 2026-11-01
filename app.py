@@ -1899,7 +1899,8 @@ def main() -> None:
 
     try:
         profiles = list_profiles()
-    except Exception:
+    except Exception as exc:
+        print(f"Supabase profile load failed: {type(exc).__name__}: {exc}", flush=True)
         st.error("Databasen kunde inte läsas med den säkra anslutningen.")
         st.caption("Kontrollera Streamlit Secrets och kör supabase_migration_hardening_v5.sql.")
         st.stop()
