@@ -222,7 +222,7 @@ class LocalProfileTests(unittest.TestCase):
         expected_modes = {
             "Lutande hantelpress": "incline_press",
             "Kabel-flyes": "cable_fly",
-            "Bröststödd roddmaskin": "chest_supported_row",
+            "Bröststödd roddmaskin": "chest_supported_machine_row",
             "Sidolyft hantlar": "lateral_raise",
             "Bröststödd high row": "chest_supported_high_row",
             "Benpress": "leg_press",

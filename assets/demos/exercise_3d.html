@@ -361,7 +361,7 @@
         const pad = box(0.95, 0.18, 2.55, palette.shorts);
         pad.position.set(0, -0.72, 0.25);
         if (incline) {
-          pad.rotation.x = -0.46;
+          pad.rotation.x = 0.46;
           pad.position.set(0, -0.32, 0.15);
         }
         const post = cylinder(0.1, 1.1);
@@ -414,6 +414,19 @@
 
       const addLegMachine = (mode) => {
         addSeat(true);
+        if (mode === "leg_press") {
+          const footPlate = box(1.65, 0.16, 1.45, palette.machineInset);
+          footPlate.position.set(0, -0.72, 2.05);
+          footPlate.rotation.x = -0.22;
+          const leftRail = box(0.12, 0.12, 2.5, palette.machine);
+          const rightRail = box(0.12, 0.12, 2.5, palette.machine);
+          leftRail.position.set(-0.72, -1.08, 1.12);
+          rightRail.position.set(0.72, -1.08, 1.12);
+          leftRail.rotation.x = -0.2;
+          rightRail.rotation.x = -0.2;
+          equipment.add(footPlate, leftRail, rightRail);
+          return;
+        }
         const arm = cylinder(0.09, 1.2, palette.accent);
         arm.rotation.z = Math.PI / 2;
         arm.position.set(0, -1.05, 1.25);
@@ -431,7 +444,7 @@
       };
 
       const addUpperBodyMachine = (mode) => {
-        if (mode === "chest_supported_high_row") {
+        if (["chest_supported_high_row", "chest_supported_machine_row"].includes(mode)) {
           addBench(true);
         } else {
           addSeat(mode !== "reverse_pec_deck");
@@ -444,13 +457,6 @@
         const top = box(3.25, 0.16, 0.22);
         top.position.set(0, 2.2, -0.72);
         equipment.add(leftPost, rightPost, top);
-
-        if (["seated_machine_row", "chest_supported_high_row"].includes(mode)) {
-          const chestPad = box(0.9, 1.15, 0.18, palette.shorts);
-          chestPad.position.set(0, mode === "chest_supported_high_row" ? 0.18 : 0.52, 0.5);
-          chestPad.rotation.x = mode === "chest_supported_high_row" ? -0.42 : 0;
-          equipment.add(chestPad);
-        }
 
         machineArmLeft = dynamicSegment(0.07, palette.accent);
         machineArmRight = dynamicSegment(0.07, palette.accent);
@@ -465,6 +471,9 @@
         } else if (mode === "chest_supported_high_row") {
           machinePivotLeft = new THREE.Vector3(-1.0, 2.0, -0.45);
           machinePivotRight = new THREE.Vector3(1.0, 2.0, -0.45);
+        } else if (mode === "chest_supported_machine_row") {
+          machinePivotLeft = new THREE.Vector3(-0.9, 0.72, 1.5);
+          machinePivotRight = new THREE.Vector3(0.9, 0.72, 1.5);
         } else {
           machinePivotLeft = new THREE.Vector3(-0.9, 0.85, 1.55);
           machinePivotRight = new THREE.Vector3(0.9, 0.85, 1.55);
@@ -573,7 +582,7 @@
       }
       if (config.mode === "calf_raise") addStep();
       if (config.mode === "machine_calf_raise") addCalfMachine();
-      if (["machine_chest_press", "reverse_pec_deck", "seated_machine_row", "chest_supported_high_row"].includes(config.mode)) {
+      if (["machine_chest_press", "reverse_pec_deck", "seated_machine_row", "chest_supported_high_row", "chest_supported_machine_row"].includes(config.mode)) {
         addUpperBodyMachine(config.mode);
       }
       if (config.mode === "ab_roller") addAbWheel();
@@ -738,9 +747,9 @@
             pose.elbowRight = mix(v(0.55, 0.08, 1.2), v(0.72, 0.85, 0.62), progress);
             pose.handRight = mix(v(0.56, -0.42, 1.4), v(0.72, 0.54, 0.42), progress);
           }
-        } else if (["chest_supported_row", "seated_row"].includes(mode)) {
+        } else if (["chest_supported_row", "chest_supported_machine_row", "seated_row"].includes(mode)) {
           pose = mode === "seated_row" ? seatedPose() : lyingPose(true);
-          if (mode === "chest_supported_row") {
+          if (["chest_supported_row", "chest_supported_machine_row"].includes(mode)) {
             pose.elbowLeft = mix(v(-0.62, -0.22, 0.5), v(-0.92, 0.48, 0.18), progress);
             pose.elbowRight = mix(v(0.62, -0.22, 0.5), v(0.92, 0.48, 0.18), progress);
             pose.handLeft = mix(v(-0.62, -0.62, 0.76), v(-0.7, 0.18, 0.26), progress);

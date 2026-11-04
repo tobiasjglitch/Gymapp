@@ -42,7 +42,7 @@ TECHNIQUE_DEMOS = {
     "bicepscurl hantlar": "biceps_curl",
     "bröstpressmaskin": "machine_chest_press",
     "bröststödd high row": "chest_supported_high_row",
-    "bröststödd roddmaskin": "chest_supported_row",
+    "bröststödd roddmaskin": "chest_supported_machine_row",
     "bulgarian split squat": "split_squat",
     "cable chest press": "cable_press",
     "cable flyes": "cable_fly",
@@ -1168,7 +1168,7 @@ def technique_demo_mode(exercise_name: str) -> str | None:
     inference_rules = [
         (("straight arm", "pulldown"), "straight_arm_pulldown"),
         (("bröststödd", "high row"), "chest_supported_high_row"),
-        (("bröststödd", "rodd"), "chest_supported_row"),
+        (("bröststödd", "rodd"), "chest_supported_machine_row"),
         (("chest supported", "row"), "chest_supported_row"),
         (("sittande", "roddmaskin"), "seated_machine_row"),
         (("seated", "row"), "seated_row"),
