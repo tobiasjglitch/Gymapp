@@ -36,8 +36,13 @@ TECHNIQUE_DEMOS = {
     "axelpress hantlar": "shoulder_press",
     "bakåtlunges": "reverse_lunge",
     "barbell hip thrust": "hip_thrust",
+    "benpress": "leg_press",
+    "benspark": "leg_extension",
     "bench leg raises": "bench_leg_raise",
     "bicepscurl hantlar": "biceps_curl",
+    "bröstpressmaskin": "machine_chest_press",
+    "bröststödd high row": "chest_supported_high_row",
+    "bröststödd roddmaskin": "chest_supported_row",
     "bulgarian split squat": "split_squat",
     "cable chest press": "cable_press",
     "cable flyes": "cable_fly",
@@ -75,6 +80,7 @@ TECHNIQUE_DEMOS = {
     "lat pull down": "lat_pulldown",
     "lat pulldown": "lat_pulldown",
     "latsdrag": "lat_pulldown",
+    "latsdrag, neutralt grepp": "neutral_grip_pulldown",
     "lateral raises": "lateral_raise",
     "lateral raises cable": "lateral_raise",
     "lean away laterals": "lateral_raise",
@@ -90,17 +96,22 @@ TECHNIQUE_DEMOS = {
     "push-ups med vikt": "push_up",
     "pushdown": "triceps_pushdown",
     "rear delt flies": "rear_delt_fly",
+    "omvänd pec deck - bakre axlar": "reverse_pec_deck",
     "reverse lunges": "reverse_lunge",
     "raka marklyft": "rdl",
     "russian twists": "russian_twist",
     "seated cable low rows": "seated_row",
+    "sidolyft i kabel": "cable_lateral_raise",
     "side lateral raises": "lateral_raise",
     "sidolyft hantlar": "lateral_raise",
+    "sittande lårcurl": "leg_curl",
+    "sittande roddmaskin": "seated_machine_row",
     "spider curls": "spider_curl",
     "straight arm pulldown": "straight_arm_pulldown",
     "suitcase carry": "carry",
     "sumo squats": "sumo_squat",
     "triceps pushdown": "triceps_pushdown",
+    "vadpress i maskin": "machine_calf_raise",
     "wide pull ups": "pullup",
     "woodchopper": "woodchop",
     "wrist curls": "wrist_curl",
@@ -184,28 +195,6 @@ def _secret_value(section: str, key: str) -> str | None:
     return None
 
 
-def _top_level_secret(key: str) -> str | None:
-    secret_files = (
-        APP_DIR / ".streamlit" / "secrets.toml",
-        Path.cwd() / ".streamlit" / "secrets.toml",
-        Path.home() / ".streamlit" / "secrets.toml",
-    )
-    if not any(path.is_file() for path in secret_files):
-        return None
-    try:
-        if key in st.secrets:
-            return str(st.secrets[key])
-    except Exception:
-        return None
-    return None
-
-
-def app_pin() -> str | None:
-    if os.environ.get("APP_PIN"):
-        return os.environ["APP_PIN"]
-    return _top_level_secret("APP_PIN") or _secret_value("app", "pin")
-
-
 def supabase_settings() -> tuple[str | None, str | None, str | None]:
     url = _secret_value("supabase", "url")
     server_key = (
@@ -229,8 +218,6 @@ def require_secure_configuration() -> None:
         problems.append("Supabase-adressen saknas.")
     if not server_key:
         problems.append("Supabase servernyckel saknas. En publik nyckel får inte läsa träningsdata.")
-    if not app_pin():
-        problems.append("APP_PIN saknas. Molnappen får inte starta olåst.")
     if not problems:
         return
 
@@ -274,22 +261,6 @@ def render_brand_header(
         """,
         unsafe_allow_html=True,
     )
-
-
-def require_pin_if_configured() -> None:
-    pin = app_pin()
-    if not pin or st.session_state.get("unlocked"):
-        return
-
-    render_brand_header("Privat")
-    typed = st.text_input("PIN", type="password", placeholder="Ange din PIN")
-    if st.button("Lås upp", use_container_width=True, type="primary"):
-        if typed == pin:
-            st.session_state["unlocked"] = True
-            st.rerun()
-        else:
-            st.error("Fel PIN.")
-    st.stop()
 
 
 def supabase_credentials() -> tuple[str | None, str | None]:
@@ -1196,8 +1167,12 @@ def technique_demo_mode(exercise_name: str) -> str | None:
 
     inference_rules = [
         (("straight arm", "pulldown"), "straight_arm_pulldown"),
+        (("bröststödd", "high row"), "chest_supported_high_row"),
+        (("bröststödd", "rodd"), "chest_supported_row"),
         (("chest supported", "row"), "chest_supported_row"),
+        (("sittande", "roddmaskin"), "seated_machine_row"),
         (("seated", "row"), "seated_row"),
+        (("neutralt", "latsdrag"), "neutral_grip_pulldown"),
         (("lat", "pulldown"), "lat_pulldown"),
         (("latsdrag",), "lat_pulldown"),
         (("face pull",), "face_pull"),
@@ -1215,16 +1190,22 @@ def technique_demo_mode(exercise_name: str) -> str | None:
         (("axelpress",), "shoulder_press"),
         (("cable", "fly"), "cable_fly"),
         (("kabel", "fly"), "cable_fly"),
+        (("sidolyft", "kabel"), "cable_lateral_raise"),
         (("cable", "press"), "cable_press"),
+        (("bröstpressmaskin",), "machine_chest_press"),
         (("leg", "press"), "leg_press"),
+        (("benpress",), "leg_press"),
         (("press",), "bench_press"),
         (("rear delt",), "rear_delt_fly"),
+        (("omvänd", "pec deck"), "reverse_pec_deck"),
         (("lateral", "raise"), "lateral_raise"),
         (("laterals",), "lateral_raise"),
         (("sidolyft",), "lateral_raise"),
         (("front", "shoulder"), "front_raise"),
         (("front", "raise"), "front_raise"),
         (("leg curl",), "leg_curl"),
+        (("lårcurl",), "leg_curl"),
+        (("benspark",), "leg_extension"),
         (("hanging", "leg"), "hanging_leg_raise"),
         (("leg raise",), "bench_leg_raise"),
         (("spider", "curl"), "spider_curl"),
@@ -1241,6 +1222,7 @@ def technique_demo_mode(exercise_name: str) -> str | None:
         (("hip", "abduction"), "hip_abduction"),
         (("abduction",), "hip_abduction"),
         (("calf", "raise"), "calf_raise"),
+        (("vadpress", "maskin"), "machine_calf_raise"),
         (("frontböj",), "front_squat"),
         (("goblet", "squat"), "goblet_squat"),
         (("sumo", "squat"), "sumo_squat"),
@@ -1850,7 +1832,7 @@ def render_history(profile: Profile) -> None:
 
 
 def render_profiles(active_profile: Profile) -> None:
-    st.caption("Profiler håller program och historik isär. Alla med appens PIN kan byta profil.")
+    st.caption("Profiler håller program och historik isär.")
     for profile in list_profiles():
         count, _ = profile_overview(profile.id)
         info_col, action_col = st.columns([3, 2], vertical_alignment="center")
@@ -1894,7 +1876,6 @@ def main() -> None:
     st.set_page_config(page_title="Lyftlogg", page_icon=str(LOGO_PATH), layout="centered")
     page_styles()
     require_secure_configuration()
-    require_pin_if_configured()
     init_db()
 
     try:

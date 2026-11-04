@@ -215,6 +215,38 @@ class LocalProfileTests(unittest.TestCase):
         )
         self.assertIn("#lat-pulldown-status[hidden]", legacy_demo)
 
+    def test_tobias_active_program_uses_exact_technique_modes(self):
+        demo_template = (app.APP_DIR / "assets" / "demos" / "exercise_3d.html").read_text(
+            encoding="utf-8"
+        )
+        expected_modes = {
+            "Lutande hantelpress": "incline_press",
+            "Kabel-flyes": "cable_fly",
+            "Bröststödd roddmaskin": "chest_supported_row",
+            "Sidolyft hantlar": "lateral_raise",
+            "Bröststödd high row": "chest_supported_high_row",
+            "Benpress": "leg_press",
+            "Sittande lårcurl": "leg_curl",
+            "Benspark": "leg_extension",
+            "Kabel-crunch": "cable_crunch",
+            "Hantelpress plan bänk": "bench_press",
+            "Bröstpressmaskin": "machine_chest_press",
+            "Sidolyft i kabel": "cable_lateral_raise",
+            "Omvänd pec deck - bakre axlar": "reverse_pec_deck",
+            "Latsdrag, neutralt grepp": "neutral_grip_pulldown",
+            "Sittande roddmaskin": "seated_machine_row",
+            "Triceps pushdown": "triceps_pushdown",
+            "Vadpress i maskin": "machine_calf_raise",
+        }
+
+        for name, expected_mode in expected_modes.items():
+            with self.subTest(name=name):
+                self.assertEqual(app.technique_demo_mode(name), expected_mode)
+                html = app.technique_demo_html(name)
+                self.assertIsNotNone(html)
+                self.assertIn(f'"mode":"{expected_mode}"', html)
+                self.assertIn(f'"{expected_mode}"', demo_template)
+
     def test_brand_logo_asset_can_be_embedded(self):
         self.assertTrue(app.LOGO_PATH.is_file())
         self.assertTrue(app.logo_data_uri().startswith("data:image/svg+xml;base64,"))

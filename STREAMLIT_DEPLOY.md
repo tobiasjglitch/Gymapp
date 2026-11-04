@@ -22,20 +22,17 @@ utkast och gör sparning av träningspass idempotent.
 Lägg bara hemligheter i Streamlit Cloud, aldrig i GitHub-repot:
 
 ```toml
-APP_PIN = "din-pin"
-
 [supabase]
 url = "https://ditt-projekt.supabase.co"
 service_role_key = "din-servernyckel"
 ```
 
 Servernyckeln får aldrig placeras i webbläsarkod eller delas publikt. Lyftlogg
-kör all databaskod på Streamlit-servern och blockerar uppstart om nyckeln eller
-`APP_PIN` saknas.
+kör all databaskod på Streamlit-servern och blockerar uppstart om nyckeln saknas.
+Appen har ingen PIN-inloggning, så den som har webbadressen kan använda profilerna.
 
 ## Kontroll efter deploy
 
-1. Lås upp appen med PIN.
-2. Byt mellan profiler och kontrollera att rätt program visas.
-3. Ändra en vikt, ladda om sidan och kontrollera att utkastet återställs.
-4. Spara ett testpass och kontrollera PB, Trend och Historik.
+1. Byt mellan profiler och kontrollera att rätt program visas.
+2. Ändra en vikt, ladda om sidan och kontrollera att utkastet återställs.
+3. Spara ett testpass och kontrollera PB, Trend och Historik.
