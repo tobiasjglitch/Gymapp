@@ -8,15 +8,16 @@
     margin: 0;
     min-height: 100%;
     overflow: hidden;
-    background: transparent;
+    background: #edf1ee;
     font-family: Inter, system-ui, sans-serif;
   }
 
   #exercise-demo {
     position: relative;
     width: 100%;
-    height: 450px;
+    height: 470px;
     overflow: hidden;
+    background: #edf1ee;
   }
 
   #exercise-demo canvas {
@@ -31,7 +32,7 @@
     inset: 0;
     display: grid;
     place-items: center;
-    color: #667078;
+    color: #66716c;
     font-size: 14px;
     font-weight: 600;
     pointer-events: none;
@@ -49,11 +50,11 @@
     width: 44px;
     height: 44px;
     place-items: center;
-    border: 1px solid rgba(18, 21, 23, 0.16);
+    border: 1px solid rgba(18, 32, 28, 0.16);
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.92);
-    color: #151719;
-    box-shadow: 0 8px 24px rgba(18, 21, 23, 0.12);
+    color: #12201c;
+    box-shadow: 0 12px 30px rgba(25, 43, 37, 0.13);
     font: inherit;
     font-size: 17px;
     cursor: pointer;
@@ -71,7 +72,7 @@
 
   @media (max-width: 520px) {
     #exercise-demo {
-      height: 410px;
+      height: 430px;
     }
   }
 </style>
@@ -94,31 +95,40 @@
       );
 
       const palette = {
-        outline: new THREE.Color("#151719"),
-        skin: new THREE.Color("#9ca5a3"),
-        shirt: new THREE.Color("#19745f"),
-        shorts: new THREE.Color("#30353a"),
-        machine: new THREE.Color("#4f5960"),
-        machineInset: new THREE.Color("#7b858a"),
-        accent: new THREE.Color("#b68a3d"),
-        floor: new THREE.Color("#e5e8ea"),
-        light: new THREE.Color("#fffdf8"),
+        skin: new THREE.Color("#b6a89d"),
+        skinShadow: new THREE.Color("#9f9186"),
+        shirt: new THREE.Color("#126956"),
+        shirtDark: new THREE.Color("#0b4e41"),
+        shorts: new THREE.Color("#26322f"),
+        shoe: new THREE.Color("#e3e7e4"),
+        machine: new THREE.Color("#34413e"),
+        machineInset: new THREE.Color("#66746f"),
+        pad: new THREE.Color("#26312e"),
+        weight: new THREE.Color("#1c2422"),
+        handle: new THREE.Color("#a8b2ad"),
+        accent: new THREE.Color("#b8ec52"),
+        floor: new THREE.Color("#dfe5e1"),
+        light: new THREE.Color("#fffdf7"),
       };
 
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-      camera.position.set(4.9, 2.55, 7.6);
-      camera.lookAt(0, 0.2, 0);
+      scene.background = new THREE.Color("#edf1ee");
+      scene.fog = new THREE.Fog("#edf1ee", 9, 18);
+      const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+      camera.position.set(4.5, 2.3, 6.7);
+      camera.lookAt(0, 0.05, 0);
 
       const renderer = new THREE.WebGLRenderer({
-        alpha: true,
+        alpha: false,
         antialias: true,
         powerPreference: "high-performance",
         preserveDrawingBuffer: true,
       });
-      renderer.setClearColor(0x000000, 0);
+      renderer.setClearColor(0xedf1ee, 1);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.08;
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.domElement.setAttribute("role", "img");
@@ -128,19 +138,9 @@
       );
       stage.prepend(renderer.domElement);
 
-      const gradientMap = new THREE.DataTexture(
-        new Uint8Array([55, 105, 165, 225]),
-        4,
-        1,
-        THREE.RedFormat
-      );
-      gradientMap.minFilter = THREE.NearestFilter;
-      gradientMap.magFilter = THREE.NearestFilter;
-      gradientMap.needsUpdate = true;
+      scene.add(new THREE.HemisphereLight(palette.light, palette.floor, 1.55));
 
-      scene.add(new THREE.HemisphereLight(palette.light, palette.floor, 0.8));
-
-      const keyLight = new THREE.DirectionalLight(palette.light, 1.55);
+      const keyLight = new THREE.DirectionalLight(palette.light, 3.1);
       keyLight.position.set(4.5, 7, 5.5);
       keyLight.castShadow = true;
       keyLight.shadow.mapSize.set(1024, 1024);
@@ -152,24 +152,23 @@
       keyLight.shadow.camera.bottom = -5;
       scene.add(keyLight);
 
-      const rimLight = new THREE.DirectionalLight(palette.shirt, 0.58);
+      const fillLight = new THREE.DirectionalLight("#a9d7c9", 1.0);
+      fillLight.position.set(-5, 4, 2);
+      scene.add(fillLight);
+
+      const rimLight = new THREE.DirectionalLight("#d6ff7c", 0.72);
       rimLight.position.set(-5, 3.5, -4);
       scene.add(rimLight);
 
-      const outlineMaterial = new THREE.MeshBasicMaterial({
-        color: palette.outline,
-        side: THREE.BackSide,
-      });
-
-      const outlinedMesh = (geometry, color, outlineScale = 1.035) => {
+      const outlinedMesh = (geometry, color) => {
         const mesh = new THREE.Mesh(
           geometry,
-          new THREE.MeshToonMaterial({ color, gradientMap })
+          new THREE.MeshStandardMaterial({
+            color,
+            roughness: 0.7,
+            metalness: 0.03,
+          })
         );
-        const outline = new THREE.Mesh(geometry, outlineMaterial);
-        outline.scale.setScalar(outlineScale);
-        outline.renderOrder = -1;
-        mesh.add(outline);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         return mesh;
@@ -220,7 +219,32 @@
         };
       };
 
-      const dynamicLine = (color = palette.outline) => {
+      const dynamicTaperedSegment = (radiusTop, radiusBottom, color, segments = 20) => {
+        const geometry = new THREE.CylinderGeometry(
+          radiusTop,
+          radiusBottom,
+          1,
+          segments,
+          2,
+          false
+        );
+        const mesh = outlinedMesh(geometry, color);
+        return {
+          mesh,
+          update(start, end) {
+            const direction = end.clone().sub(start);
+            const length = Math.max(0.001, direction.length());
+            mesh.position.copy(start).add(end).multiplyScalar(0.5);
+            mesh.quaternion.setFromUnitVectors(
+              new THREE.Vector3(0, 1, 0),
+              direction.normalize()
+            );
+            mesh.scale.set(1, length, 1);
+          },
+        };
+      };
+
+      const dynamicLine = (color = palette.machine) => {
         const positions = new Float32Array(6);
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute(
@@ -247,6 +271,7 @@
 
       const root = new THREE.Group();
       root.rotation.y = -0.12;
+      root.scale.setScalar(1.1);
       scene.add(root);
 
       const equipment = new THREE.Group();
@@ -254,32 +279,33 @@
       root.add(equipment, figure);
 
       const body = {
-        torso: dynamicSegment(0.4, palette.shirt),
-        neck: dynamicSegment(0.15, palette.skin),
-        leftUpperArm: dynamicSegment(0.16, palette.shirt),
-        rightUpperArm: dynamicSegment(0.16, palette.shirt),
-        leftForearm: dynamicSegment(0.14, palette.skin),
-        rightForearm: dynamicSegment(0.14, palette.skin),
-        leftThigh: dynamicSegment(0.2, palette.shorts),
-        rightThigh: dynamicSegment(0.2, palette.shorts),
-        leftShin: dynamicSegment(0.17, palette.skin),
-        rightShin: dynamicSegment(0.17, palette.skin),
+        torso: dynamicTaperedSegment(0.39, 0.27, palette.shirt),
+        waist: dynamicTaperedSegment(0.27, 0.3, palette.shirtDark),
+        neck: dynamicSegment(0.11, palette.skin),
+        leftUpperArm: dynamicTaperedSegment(0.11, 0.15, palette.shirt, 16),
+        rightUpperArm: dynamicTaperedSegment(0.11, 0.15, palette.shirt, 16),
+        leftForearm: dynamicTaperedSegment(0.095, 0.125, palette.skin, 16),
+        rightForearm: dynamicTaperedSegment(0.095, 0.125, palette.skin, 16),
+        leftThigh: dynamicTaperedSegment(0.16, 0.21, palette.shorts, 18),
+        rightThigh: dynamicTaperedSegment(0.16, 0.21, palette.shorts, 18),
+        leftShin: dynamicTaperedSegment(0.105, 0.15, palette.skinShadow, 18),
+        rightShin: dynamicTaperedSegment(0.105, 0.15, palette.skinShadow, 18),
       };
 
       for (const segment of Object.values(body)) {
         figure.add(segment.mesh);
       }
 
-      const pelvis = sphere(0.38, palette.shorts);
-      pelvis.scale.set(1.05, 0.72, 0.82);
-      const head = sphere(0.38, palette.skin);
-      head.scale.set(0.9, 1.08, 0.92);
-      const leftElbow = sphere(0.15, palette.skin);
-      const rightElbow = sphere(0.15, palette.skin);
-      const leftHand = sphere(0.14, palette.skin);
-      const rightHand = sphere(0.14, palette.skin);
-      const leftKnee = sphere(0.18, palette.shorts);
-      const rightKnee = sphere(0.18, palette.shorts);
+      const pelvis = sphere(0.33, palette.shorts);
+      pelvis.scale.set(1.02, 0.72, 0.88);
+      const head = sphere(0.255, palette.skin);
+      head.scale.set(0.88, 1.08, 0.95);
+      const leftElbow = sphere(0.132, palette.skin);
+      const rightElbow = sphere(0.132, palette.skin);
+      const leftHand = sphere(0.125, palette.skin);
+      const rightHand = sphere(0.125, palette.skin);
+      const leftKnee = sphere(0.17, palette.shorts);
+      const rightKnee = sphere(0.17, palette.shorts);
       figure.add(
         pelvis,
         head,
@@ -293,29 +319,50 @@
 
       const makeShoe = () => {
         const shoe = outlinedMesh(
-          new THREE.CapsuleGeometry(0.14, 0.38, 6, 12),
-          palette.shorts,
-          1.045
+          new THREE.CapsuleGeometry(0.13, 0.34, 7, 16),
+          palette.shoe
         );
         shoe.rotation.x = Math.PI / 2;
-        shoe.scale.y = 0.84;
+        shoe.scale.set(1, 1.03, 0.76);
         figure.add(shoe);
         return shoe;
       };
       const leftShoe = makeShoe();
       const rightShoe = makeShoe();
 
+      const muscleMaterial = new THREE.MeshStandardMaterial({
+        color: palette.accent,
+        emissive: new THREE.Color("#294310"),
+        emissiveIntensity: 0.24,
+        roughness: 0.62,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const muscleMarkers = Array.from({ length: 4 }, () => {
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 20, 14),
+          muscleMaterial
+        );
+        marker.castShadow = true;
+        marker.visible = false;
+        figure.add(marker);
+        return marker;
+      });
+
       const makeDumbbell = () => {
         const group = new THREE.Group();
-        const handle = cylinder(0.04, 0.42, palette.accent);
-        handle.rotation.x = Math.PI / 2;
-        const plateA = cylinder(0.12, 0.09, palette.machine);
-        const plateB = cylinder(0.12, 0.09, palette.machine);
-        plateA.rotation.x = Math.PI / 2;
-        plateB.rotation.x = Math.PI / 2;
-        plateA.position.z = -0.2;
-        plateB.position.z = 0.2;
-        group.add(handle, plateA, plateB);
+        const handle = cylinder(0.035, 0.42, palette.handle, 18);
+        handle.rotation.z = Math.PI / 2;
+        group.add(handle);
+        for (const x of [-0.25, 0.25]) {
+          const inner = cylinder(0.13, 0.095, palette.weight, 20);
+          const outer = cylinder(0.16, 0.085, palette.weight, 20);
+          inner.rotation.z = Math.PI / 2;
+          outer.rotation.z = Math.PI / 2;
+          inner.position.x = x;
+          outer.position.x = x + Math.sign(x) * 0.08;
+          group.add(inner, outer);
+        }
         equipment.add(group);
         return group;
       };
@@ -354,19 +401,46 @@
       let landmineBar = null;
       let machineArmLeft = null;
       let machineArmRight = null;
+      let machineHandleLeft = null;
+      let machineHandleRight = null;
       let machinePivotLeft = null;
       let machinePivotRight = null;
 
+      const alignBetween = (mesh, start, end) => {
+        const direction = end.clone().sub(start);
+        mesh.position.copy(start).add(end).multiplyScalar(0.5);
+        mesh.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          direction.clone().normalize()
+        );
+        mesh.scale.y = direction.length();
+      };
+
       const addBench = (incline = false) => {
-        const pad = box(0.95, 0.18, 2.55, palette.shorts);
-        pad.position.set(0, -0.72, 0.25);
         if (incline) {
-          pad.rotation.x = 0.46;
-          pad.position.set(0, -0.32, 0.15);
+          const backPad = box(0.92, 1, 0.17, palette.pad);
+          alignBetween(
+            backPad,
+            new THREE.Vector3(0, -0.62, 0.55),
+            new THREE.Vector3(0, 0.3, -1.34)
+          );
+          const seatPad = box(0.96, 0.17, 0.82, palette.pad);
+          seatPad.position.set(0, -0.67, 0.82);
+          seatPad.rotation.x = -0.08;
+          equipment.add(backPad, seatPad);
+        } else {
+          const pad = box(0.95, 0.18, 2.7, palette.pad);
+          pad.position.set(0, -0.72, 0.25);
+          equipment.add(pad);
         }
-        const post = cylinder(0.1, 1.1);
-        post.position.set(0, -1.28, 0.4);
-        equipment.add(pad, post);
+
+        const post = cylinder(0.085, 1.05);
+        post.position.set(0, -1.29, 0.42);
+        const base = box(1.55, 0.12, 0.18, palette.machine);
+        base.position.set(0, -1.79, 0.42);
+        const rearBase = box(1.35, 0.12, 0.18, palette.machine);
+        rearBase.position.set(0, -1.79, -1.05);
+        equipment.add(post, base, rearBase);
       };
 
       const addCableFrame = (wide = false) => {
@@ -388,13 +462,13 @@
       };
 
       const addSeat = (back = false) => {
-        const seat = box(0.9, 0.17, 1.0, palette.shorts);
+        const seat = box(0.9, 0.17, 1.0, palette.pad);
         seat.position.set(0, -0.65, 0.35);
         const post = cylinder(0.11, 1.1);
         post.position.set(0, -1.25, 0.3);
         equipment.add(seat, post);
         if (back) {
-          const backPad = box(0.95, 1.55, 0.17, palette.shorts);
+          const backPad = box(0.95, 1.55, 0.17, palette.pad);
           backPad.position.set(0, 0.05, -0.12);
           backPad.rotation.x = -0.1;
           equipment.add(backPad);
@@ -430,7 +504,7 @@
         const arm = cylinder(0.09, 1.2, palette.accent);
         arm.rotation.z = Math.PI / 2;
         arm.position.set(0, -1.05, 1.25);
-        roller = cylinder(0.2, 1.05, palette.shorts);
+        roller = cylinder(0.2, 1.05, palette.pad);
         roller.rotation.z = Math.PI / 2;
         const rollerY = mode === "leg_curl" ? -1.28 : -0.85;
         roller.position.set(0, rollerY, 1.35);
@@ -458,9 +532,23 @@
         top.position.set(0, 2.2, -0.72);
         equipment.add(leftPost, rightPost, top);
 
-        machineArmLeft = dynamicSegment(0.07, palette.accent);
-        machineArmRight = dynamicSegment(0.07, palette.accent);
-        equipment.add(machineArmLeft.mesh, machineArmRight.mesh);
+        machineArmLeft = dynamicSegment(0.065, palette.machine);
+        machineArmRight = dynamicSegment(0.065, palette.machine);
+        machineHandleLeft = dynamicSegment(0.055, palette.accent);
+        machineHandleRight = dynamicSegment(0.055, palette.accent);
+        equipment.add(
+          machineArmLeft.mesh,
+          machineArmRight.mesh,
+          machineHandleLeft.mesh,
+          machineHandleRight.mesh
+        );
+
+        if (mode === "reverse_pec_deck") {
+          const chestPad = box(0.68, 0.92, 0.16, palette.pad);
+          chestPad.position.set(0, 0.55, 0.42);
+          chestPad.rotation.x = -0.1;
+          equipment.add(chestPad);
+        }
 
         if (mode === "machine_chest_press") {
           machinePivotLeft = new THREE.Vector3(-0.82, 1.42, -0.35);
@@ -486,8 +574,8 @@
         const rightPost = box(0.16, 3.7, 0.22);
         leftPost.position.set(-0.95, -0.05, -0.45);
         rightPost.position.set(0.95, -0.05, -0.45);
-        const leftPad = box(0.48, 0.18, 0.7, palette.shorts);
-        const rightPad = box(0.48, 0.18, 0.7, palette.shorts);
+        const leftPad = box(0.48, 0.18, 0.7, palette.pad);
+        const rightPad = box(0.48, 0.18, 0.7, palette.pad);
         leftPad.position.set(-0.38, 1.43, 0);
         rightPad.position.set(0.38, 1.43, 0);
         equipment.add(leftPost, rightPost, leftPad, rightPad);
@@ -651,6 +739,12 @@
         pose.kneeRight = v(0.3, -0.18, 1.42);
         pose.ankleLeft = v(-0.3, -1.12, 1.78);
         pose.ankleRight = v(0.3, -1.12, 1.78);
+        const liftY = incline ? 0.13 : 0.09;
+        const liftZ = incline ? 0.065 : 0;
+        for (const key of ["pelvis", "chest", "neck", "head", "shoulderLeft", "shoulderRight", "hipLeft", "hipRight"]) {
+          pose[key].y += liftY;
+          pose[key].z += liftZ;
+        }
         return pose;
       };
 
@@ -774,6 +868,9 @@
           pose.handRight = mix(v(0.38, 1.0, 1.55), v(0.44, 0.98, 0.24), progress);
         } else if (mode === "reverse_pec_deck") {
           pose = seatedPose();
+          for (const key of ["chest", "neck", "head", "shoulderLeft", "shoulderRight"]) {
+            pose[key].z += 0.26;
+          }
           pose.elbowLeft = mix(v(-0.28, 1.18, 0.86), v(-1.02, 1.2, 0.02), progress);
           pose.elbowRight = mix(v(0.28, 1.18, 0.86), v(1.02, 1.2, 0.02), progress);
           pose.handLeft = mix(v(-0.2, 1.18, 1.42), v(-1.5, 1.2, -0.02), progress);
@@ -917,8 +1014,8 @@
           if (mode === "leg_press") {
             pose.kneeLeft = mix(v(-0.34, -0.65, 0.72), v(-0.34, -0.62, 1.48), progress);
             pose.kneeRight = mix(v(0.34, -0.65, 0.72), v(0.34, -0.62, 1.48), progress);
-            pose.ankleLeft = mix(v(-0.34, -0.95, 1.18), v(-0.34, -0.82, 2.0), progress);
-            pose.ankleRight = mix(v(0.34, -0.95, 1.18), v(0.34, -0.82, 2.0), progress);
+            pose.ankleLeft = mix(v(-0.34, -0.68, 1.18), v(-0.34, -0.58, 2.0), progress);
+            pose.ankleRight = mix(v(0.34, -0.68, 1.18), v(0.34, -0.58, 2.0), progress);
           } else if (mode === "leg_curl") {
             pose.kneeLeft = v(-0.34, -0.72, 1.15);
             pose.kneeRight = v(0.34, -0.72, 1.15);
@@ -943,17 +1040,37 @@
           pose.ankleLeft.y = -1.62 + rise * 0.15;
           pose.ankleRight.y = -1.62 + rise * 0.15;
         } else if (["cable_crunch", "abs_bench"].includes(mode)) {
-          pose = mode === "abs_bench" ? lyingPose(true) : standingPose();
           const curl = progress;
-          pose.chest = mix(pose.chest, v(0, 0.32, 0.72), curl);
-          pose.neck = mix(pose.neck, v(0, 0.62, 1.02), curl);
-          pose.head = mix(pose.head, v(0, 0.84, 1.28), curl);
-          pose.shoulderLeft = mix(pose.shoulderLeft, v(-0.46, 0.5, 0.84), curl);
-          pose.shoulderRight = mix(pose.shoulderRight, v(0.46, 0.5, 0.84), curl);
-          pose.elbowLeft = v(-0.56, 1.28 - curl * 0.55, 0.32);
-          pose.elbowRight = v(0.56, 1.28 - curl * 0.55, 0.32);
-          pose.handLeft = v(-0.32, 1.58 - curl * 0.5, 0.2);
-          pose.handRight = v(0.32, 1.58 - curl * 0.5, 0.2);
+          if (mode === "cable_crunch") {
+            pose = standingPose();
+            pose.pelvis = v(0, -0.82, -0.02);
+            pose.hipLeft = v(-0.23, -0.94, -0.04);
+            pose.hipRight = v(0.23, -0.94, -0.04);
+            pose.kneeLeft = v(-0.28, -1.56, -0.28);
+            pose.kneeRight = v(0.28, -1.56, -0.28);
+            pose.ankleLeft = v(-0.28, -1.7, -0.92);
+            pose.ankleRight = v(0.28, -1.7, -0.92);
+            pose.chest = mix(v(0, 0.12, 0.16), v(0, -0.42, 0.84), curl);
+            pose.neck = mix(v(0, 0.68, 0.08), v(0, -0.08, 1.14), curl);
+            pose.head = mix(v(0, 1.06, 0.02), v(0, 0.16, 1.42), curl);
+            pose.shoulderLeft = mix(v(-0.46, 0.42, 0.16), v(-0.44, -0.28, 0.96), curl);
+            pose.shoulderRight = mix(v(0.46, 0.42, 0.16), v(0.44, -0.28, 0.96), curl);
+            pose.elbowLeft = mix(v(-0.54, 0.64, 0.28), v(-0.5, 0.0, 1.1), curl);
+            pose.elbowRight = mix(v(0.54, 0.64, 0.28), v(0.5, 0.0, 1.1), curl);
+            pose.handLeft = mix(v(-0.28, 0.92, 0.2), v(-0.26, 0.2, 1.24), curl);
+            pose.handRight = mix(v(0.28, 0.92, 0.2), v(0.26, 0.2, 1.24), curl);
+          } else {
+            pose = lyingPose(true);
+            pose.chest = mix(pose.chest, v(0, 0.32, 0.72), curl);
+            pose.neck = mix(pose.neck, v(0, 0.62, 1.02), curl);
+            pose.head = mix(pose.head, v(0, 0.84, 1.28), curl);
+            pose.shoulderLeft = mix(pose.shoulderLeft, v(-0.46, 0.5, 0.84), curl);
+            pose.shoulderRight = mix(pose.shoulderRight, v(0.46, 0.5, 0.84), curl);
+            pose.elbowLeft = v(-0.56, 1.28 - curl * 0.55, 0.32);
+            pose.elbowRight = v(0.56, 1.28 - curl * 0.55, 0.32);
+            pose.handLeft = v(-0.32, 1.58 - curl * 0.5, 0.2);
+            pose.handRight = v(0.32, 1.58 - curl * 0.5, 0.2);
+          }
         } else if (mode === "bench_leg_raise") {
           pose = lyingPose(false);
           pose.kneeLeft = mix(v(-0.26, -0.62, 1.15), v(-0.26, 0.28, 0.48), progress);
@@ -1027,8 +1144,14 @@
       };
 
       const updateBody = (pose) => {
-        body.torso.update(pose.pelvis, pose.chest);
-        body.neck.update(pose.neck, pose.head.clone().add(v(0, -0.26, 0)));
+        const waistPoint = pose.pelvis.clone().lerp(pose.chest, 0.28);
+        const upperChest = pose.shoulderLeft.clone().add(pose.shoulderRight).multiplyScalar(0.5);
+        body.waist.update(pose.pelvis, waistPoint);
+        body.torso.update(waistPoint, upperChest);
+        body.neck.update(
+          pose.neck.clone().add(v(0, -0.18, 0)),
+          pose.head.clone().add(v(0, -0.24, 0))
+        );
         body.leftUpperArm.update(pose.shoulderLeft, pose.elbowLeft);
         body.rightUpperArm.update(pose.shoulderRight, pose.elbowRight);
         body.leftForearm.update(pose.elbowLeft, pose.handLeft);
@@ -1054,6 +1177,54 @@
         if (["goblet_squat", "sumo_squat"].includes(config.mode)) {
           rightDumbbell.position.copy(pose.handLeft).add(pose.handRight).multiplyScalar(0.5);
           rightDumbbell.rotation.z = Math.PI / 2;
+        }
+
+        updateMuscleHighlights(pose);
+      };
+
+      const setMarker = (index, position, scale, rotationX = 0) => {
+        const marker = muscleMarkers[index];
+        marker.visible = true;
+        marker.position.copy(position);
+        marker.scale.set(scale[0], scale[1], scale[2]);
+        marker.rotation.set(rotationX, 0, 0);
+      };
+
+      const updateMuscleHighlights = (pose) => {
+        for (const marker of muscleMarkers) marker.visible = false;
+        const mode = config.mode;
+        const chestModes = new Set(["incline_press", "bench_press", "cable_fly", "machine_chest_press", "cable_press", "push_up"]);
+        const backModes = new Set(["chest_supported_row", "chest_supported_machine_row", "chest_supported_high_row", "seated_row", "seated_machine_row", "lat_pulldown", "neutral_grip_pulldown", "pullup", "chinup", "straight_arm_pulldown"]);
+        const shoulderModes = new Set(["lateral_raise", "cable_lateral_raise", "front_raise", "shoulder_press", "reverse_pec_deck", "rear_delt_fly", "face_pull"]);
+        const quadModes = new Set(["leg_press", "leg_extension", "squat", "front_squat", "goblet_squat", "split_squat", "reverse_lunge"]);
+
+        if (chestModes.has(mode)) {
+          const chestBase = pose.chest.clone().lerp(pose.neck, 0.18);
+          setMarker(0, chestBase.clone().add(v(-0.18, 0.035, 0.19)), [0.98, 0.42, 0.25], 0.45);
+          setMarker(1, chestBase.clone().add(v(0.18, 0.035, 0.19)), [0.98, 0.42, 0.25], 0.45);
+        } else if (backModes.has(mode)) {
+          const upperBack = pose.chest.clone().lerp(pose.neck, 0.1);
+          setMarker(0, upperBack.clone().add(v(-0.21, 0.03, 0.24)), [0.92, 0.5, 0.25], 0.35);
+          setMarker(1, upperBack.clone().add(v(0.21, 0.03, 0.24)), [0.92, 0.5, 0.25], 0.35);
+        } else if (shoulderModes.has(mode)) {
+          setMarker(0, pose.shoulderLeft.clone(), [0.82, 0.82, 0.82]);
+          setMarker(1, pose.shoulderRight.clone(), [0.82, 0.82, 0.82]);
+        } else if (quadModes.has(mode)) {
+          setMarker(0, pose.hipLeft.clone().lerp(pose.kneeLeft, 0.48).add(v(0, 0.02, 0.15)), [0.72, 1.45, 0.65]);
+          setMarker(1, pose.hipRight.clone().lerp(pose.kneeRight, 0.48).add(v(0, 0.02, 0.15)), [0.72, 1.45, 0.65]);
+        } else if (mode === "leg_curl") {
+          setMarker(0, pose.hipLeft.clone().lerp(pose.kneeLeft, 0.5).add(v(0, 0, -0.16)), [0.68, 1.4, 0.58]);
+          setMarker(1, pose.hipRight.clone().lerp(pose.kneeRight, 0.5).add(v(0, 0, -0.16)), [0.68, 1.4, 0.58]);
+        } else if (["calf_raise", "machine_calf_raise"].includes(mode)) {
+          setMarker(0, pose.kneeLeft.clone().lerp(pose.ankleLeft, 0.5).add(v(0, 0, -0.13)), [0.58, 1.25, 0.56]);
+          setMarker(1, pose.kneeRight.clone().lerp(pose.ankleRight, 0.5).add(v(0, 0, -0.13)), [0.58, 1.25, 0.56]);
+        } else if (["cable_crunch", "abs_bench", "bench_leg_raise", "hanging_leg_raise", "ab_roller", "hollow_hold"].includes(mode)) {
+          const center = pose.pelvis.clone().lerp(pose.chest, 0.58).add(v(0, 0, 0.25));
+          setMarker(0, center.clone().add(v(0, 0.18, 0)), [0.8, 0.5, 0.28]);
+          setMarker(1, center.clone().add(v(0, -0.12, 0)), [0.75, 0.48, 0.28]);
+        } else if (["triceps_pushdown", "overhead_extension"].includes(mode)) {
+          setMarker(0, pose.shoulderLeft.clone().lerp(pose.elbowLeft, 0.55).add(v(0, 0, -0.13)), [0.52, 1.08, 0.5]);
+          setMarker(1, pose.shoulderRight.clone().lerp(pose.elbowRight, 0.55).add(v(0, 0, -0.13)), [0.52, 1.08, 0.5]);
         }
       };
 
@@ -1104,6 +1275,14 @@
         if (machineArmLeft && machineArmRight && machinePivotLeft && machinePivotRight) {
           machineArmLeft.update(machinePivotLeft, pose.handLeft);
           machineArmRight.update(machinePivotRight, pose.handRight);
+          machineHandleLeft.update(
+            pose.handLeft.clone().add(v(0, -0.14, 0)),
+            pose.handLeft.clone().add(v(0, 0.14, 0))
+          );
+          machineHandleRight.update(
+            pose.handRight.clone().add(v(0, -0.14, 0)),
+            pose.handRight.clone().add(v(0, 0.14, 0))
+          );
         }
 
         if (roller) {
@@ -1203,6 +1382,23 @@
         const height = Math.max(1, stage.clientHeight);
         renderer.setSize(width, height, false);
         camera.aspect = width / height;
+        const spaciousModes = new Set([
+          "chest_supported_high_row",
+          "leg_press",
+          "leg_curl",
+          "leg_extension",
+          "machine_calf_raise",
+        ]);
+        if (width < 520) {
+          camera.position.set(5.2, 2.65, 8.4);
+          camera.lookAt(0, -0.02, 0.12);
+        } else if (spaciousModes.has(config.mode)) {
+          camera.position.set(4.95, 2.5, 7.45);
+          camera.lookAt(0, -0.1, 0.28);
+        } else {
+          camera.position.set(4.5, 2.3, 6.7);
+          camera.lookAt(0, 0.05, 0);
+        }
         camera.updateProjectionMatrix();
       };
 

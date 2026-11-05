@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -246,6 +247,15 @@ class LocalProfileTests(unittest.TestCase):
                 self.assertIsNotNone(html)
                 self.assertIn(f'"mode":"{expected_mode}"', html)
                 self.assertIn(f'"{expected_mode}"', demo_template)
+
+        gallery = (app.APP_DIR / "prototypes" / "all_exercises_gallery.html").read_text(
+            encoding="utf-8"
+        )
+        gallery_modes = re.findall(r'\["[^"]+", "([a-z_]+)"\]', gallery)
+        self.assertEqual(len(gallery_modes), 17)
+        self.assertEqual(set(gallery_modes), set(expected_modes.values()))
+        self.assertIn("THREE.ACESFilmicToneMapping", demo_template)
+        self.assertIn("updateMuscleHighlights", demo_template)
 
     def test_brand_logo_asset_can_be_embedded(self):
         self.assertTrue(app.LOGO_PATH.is_file())
