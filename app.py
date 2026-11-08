@@ -119,6 +119,39 @@ TECHNIQUE_DEMOS = {
     "wrist curls": "wrist_curl",
 }
 
+MOBILITY_LIBRARY = {
+    "dead_hang": {
+        "name": "Stånghäng",
+        "mode": "mobility_dead_hang",
+        "instruction": "Häng avslappnat. Ha fötterna lätt i golvet om axlarna behöver avlastning.",
+        "duration": 25,
+    },
+    "deep_squat": {
+        "name": "Djup squat med stöd",
+        "mode": "mobility_deep_squat",
+        "instruction": "Håll i ett ställ, sitt djupt och låt knäna följa tårna.",
+        "duration": 25,
+    },
+    "thoracic_rotation": {
+        "name": "Bröstryggsrotation på alla fyra",
+        "mode": "mobility_thoracic_rotation",
+        "instruction": "Håll höfterna stilla och rotera lugnt från bröstryggen.",
+        "duration": 25,
+    },
+    "hip_flexor": {
+        "name": "Höftböjarstretch",
+        "mode": "mobility_hip_flexor",
+        "instruction": "Spänn rumpan på sidan med knät i golvet och för höften lätt framåt.",
+        "duration": 25,
+    },
+    "chest_opener": {
+        "name": "Bröstöppnare mot kabelställ",
+        "mode": "mobility_chest_opener",
+        "instruction": "Placera underarmen mot stolpen och rotera kroppen lugnt bort.",
+        "duration": 25,
+    },
+}
+
 STARTER_PROGRAM = {
     "Pass 1": [
         ("Lutande hantelpress", 4, 6, 10),
@@ -1277,6 +1310,48 @@ def technique_demo_html(exercise_name: str) -> str | None:
     return path.read_text(encoding="utf-8").replace("__DEMO_CONFIG__", payload)
 
 
+def mobility_for_exercise(exercise_name: str, index: int, total: int) -> str:
+    if index == total - 1:
+        return "dead_hang"
+
+    normalized_name = " ".join(exercise_name.strip().split()).casefold()
+    lower_body_terms = (
+        "benpress",
+        "lårcurl",
+        "benspark",
+        "vadpress",
+        "hip thrust",
+        "höftabduktion",
+        "squat",
+        "knäböj",
+        "marklyft",
+        "lung",
+    )
+    core_terms = ("crunch", "woodchop", "rotation", "abs", "hollow", "leg raise")
+    if any(term in normalized_name for term in lower_body_terms):
+        return "thoracic_rotation" if index % 2 == 0 else "chest_opener"
+    if any(term in normalized_name for term in core_terms):
+        return "thoracic_rotation"
+    return "hip_flexor" if index % 2 == 0 else "deep_squat"
+
+
+def mobility_demo_html(mobility_key: str) -> str | None:
+    mobility = MOBILITY_LIBRARY.get(mobility_key)
+    path = APP_DIR / "assets" / "demos" / "exercise_3d.html"
+    if not mobility or not path.exists():
+        return None
+    payload = json.dumps(
+        {
+            "name": mobility["name"],
+            "mode": mobility["mode"],
+            "duration": mobility["duration"],
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).replace("</", "<\\/")
+    return path.read_text(encoding="utf-8").replace("__DEMO_CONFIG__", payload)
+
+
 dialog_decorator = getattr(st, "dialog", None) or st.experimental_dialog
 
 
@@ -1288,6 +1363,23 @@ def render_technique_dialog(exercise_name: str) -> None:
         return
     st.markdown(
         f"<div class='technique-dialog-title'>{escape(exercise_name)}</div>",
+        unsafe_allow_html=True,
+    )
+    components.html(demo_html, height=460, scrolling=False)
+
+
+@dialog_decorator("Rörlighetspaus", width="large")
+def render_mobility_dialog(mobility_key: str) -> None:
+    mobility = MOBILITY_LIBRARY.get(mobility_key)
+    demo_html = mobility_demo_html(mobility_key)
+    if not mobility or not demo_html:
+        st.error("Rörlighetspausen kunde inte laddas.")
+        return
+    st.markdown(
+        f"""
+        <div class="technique-dialog-title">{escape(str(mobility['name']))}</div>
+        <div class="mobility-dialog-instruction">{escape(str(mobility['instruction']))}</div>
+        """,
         unsafe_allow_html=True,
     )
     components.html(demo_html, height=460, scrolling=False)
@@ -1381,6 +1473,12 @@ def page_styles() -> None:
         .exercise-title { font-weight:800; font-size:1.03rem; line-height:1.15; }
         .hint { color:var(--muted); font-size:.8rem; margin-top:.12rem; }
         .technique-dialog-title { color:var(--ink); font-size:1.08rem; font-weight:800; margin-bottom:.35rem; }
+        .mobility-dialog-instruction { color:var(--muted); font-size:.88rem; margin:-.12rem 0 .55rem; }
+        .mobility-pause { display:flex; align-items:center; justify-content:space-between; gap:.65rem; padding:.48rem .62rem; margin:-.15rem 0 .58rem; border:1px solid rgba(13,128,102,.22); border-radius:8px; background:var(--soft); }
+        .mobility-pause div { min-width:0; }
+        .mobility-pause span { display:block; color:var(--accent); font-size:.68rem; font-weight:800; text-transform:uppercase; }
+        .mobility-pause strong { display:block; color:var(--ink); font-size:.86rem; line-height:1.2; margin-top:.06rem; }
+        .mobility-pause em { color:var(--muted); font-size:.76rem; font-style:normal; font-weight:700; white-space:nowrap; }
         .history-row { display:grid; grid-template-columns:minmax(8rem,1fr) minmax(0,2fr); gap:.65rem; padding:.44rem 0; border-bottom:1px solid var(--line); }
         .history-row:last-of-type { border-bottom:0; }
         .history-row strong { color:var(--ink); font-size:.9rem; }
@@ -1459,6 +1557,7 @@ def page_styles() -> None:
             div[role="radiogroup"] label p { font-size:.74rem; }
             .suggestion { display:block; }
             .suggestion span { display:block; text-align:left; margin-top:.08rem; }
+            .mobility-pause { padding:.44rem .52rem; margin-top:-.12rem; }
             div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"],
             div[data-testid="stVerticalBlock"]:has(.exercise-title) [data-testid="stHorizontalBlock"] {
                 flex-wrap:nowrap!important; gap:.4rem!important;
@@ -1563,7 +1662,7 @@ def render_today(profile: Profile) -> None:
             key=f"notes_{profile.id}_{selected_day}",
         )
     draft_is_dirty = workout_date != date.today() or bool(notes.strip())
-    for exercise in plan:
+    for exercise_index, exercise in enumerate(plan):
         pb = best_for_exercise(exercise.name, history)
         suggestion = suggest_weight(exercise, history)
         rep_defaults = suggested_reps(exercise, history)
@@ -1639,6 +1738,39 @@ def render_today(profile: Profile) -> None:
         draft_is_dirty = draft_is_dirty or bool(done)
         draft_is_dirty = draft_is_dirty or float(weight) != float(suggestion.weight)
         draft_is_dirty = draft_is_dirty or reps != rep_defaults
+        mobility_key = mobility_for_exercise(exercise.name, exercise_index, len(plan))
+        mobility_seen_key = f"mobility_seen_{profile.id}_{selected_day}_{exercise.id}"
+        if done and not st.session_state.get(mobility_seen_key, False):
+            mobility = MOBILITY_LIBRARY[mobility_key]
+            st.markdown(
+                f"""
+                <div class="mobility-pause">
+                    <div><span>Rörlighetspaus</span><strong>{escape(str(mobility['name']))}</strong></div>
+                    <em>{mobility['duration']} sek</em>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            start_col, skip_col = st.columns([1.45, 1], gap="small")
+            with start_col:
+                start_mobility = st.button(
+                    "Starta 25 s",
+                    key=f"mobility_start_{profile.id}_{selected_day}_{exercise.id}",
+                    use_container_width=True,
+                    type="primary",
+                )
+            with skip_col:
+                skip_mobility = st.button(
+                    "Hoppa över",
+                    key=f"mobility_skip_{profile.id}_{selected_day}_{exercise.id}",
+                    use_container_width=True,
+                )
+            if start_mobility:
+                st.session_state[mobility_seen_key] = True
+                render_mobility_dialog(mobility_key)
+            if skip_mobility:
+                st.session_state[mobility_seen_key] = True
+                st.rerun()
 
     signature_key = f"draft_signature_{profile.id}_{selected_day}"
     current_signature = workout_draft_signature(workout_date, notes, draft_payload)
@@ -1687,6 +1819,7 @@ def render_today(profile: Profile) -> None:
                     [
                         f"done_{profile.id}_{exercise.id}",
                         f"weight_{profile.id}_{exercise.id}",
+                        f"mobility_seen_{profile.id}_{selected_day}_{exercise.id}",
                         *[
                             f"reps_{profile.id}_{exercise.id}_{set_index}"
                             for set_index in range(1, exercise.sets + 1)

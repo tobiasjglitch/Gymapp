@@ -222,6 +222,35 @@ class LocalProfileTests(unittest.TestCase):
         )
         self.assertIn("#lat-pulldown-status[hidden]", legacy_demo)
 
+    def test_mobility_library_uses_3d_modes_and_timer(self):
+        expected_modes = {
+            "dead_hang": "mobility_dead_hang",
+            "deep_squat": "mobility_deep_squat",
+            "thoracic_rotation": "mobility_thoracic_rotation",
+            "hip_flexor": "mobility_hip_flexor",
+            "chest_opener": "mobility_chest_opener",
+        }
+        template = (app.APP_DIR / "assets" / "demos" / "exercise_3d.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(
+            app.mobility_for_exercise("Triceps pushdown", 4, 5),
+            "dead_hang",
+        )
+        self.assertEqual(
+            app.mobility_for_exercise("Benpress", 0, 4),
+            "thoracic_rotation",
+        )
+        for mobility_key, mode in expected_modes.items():
+            with self.subTest(mobility_key=mobility_key):
+                html = app.mobility_demo_html(mobility_key)
+                self.assertIsNotNone(html)
+                self.assertIn(f'"mode":"{mode}"', html)
+                self.assertIn('"duration":25', html)
+                self.assertIn(mode, template)
+                self.assertIn('id="mobility-timer"', html)
+
     def test_tobias_active_program_uses_exact_technique_modes(self):
         demo_template = (app.APP_DIR / "assets" / "demos" / "exercise_3d.html").read_text(
             encoding="utf-8"
@@ -386,6 +415,32 @@ app.main()
             with sqlite3.connect(db_path) as conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM workouts").fetchone()[0], 1)
                 self.assertGreater(conn.execute("SELECT COUNT(*) FROM workout_sets").fetchone()[0], 0)
+
+    def test_completed_exercise_offers_optional_mobility_pause(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "gymapp.db"
+            script = f"""
+from pathlib import Path
+import app
+
+app.DB_PATH = Path({str(db_path)!r})
+app.use_supabase = lambda: False
+app.clear_data_cache()
+app.main()
+"""
+            tested_app = AppTest.from_string(script, default_timeout=10).run()
+            tested_app.checkbox[0].check().run()
+
+            labels = [button.label for button in tested_app.button]
+            self.assertIn("Starta 25 s", labels)
+            self.assertIn("Hoppa över", labels)
+            self.assertTrue(
+                any("Rörlighetspaus" in element.value for element in tested_app.markdown)
+            )
+
+            next(button for button in tested_app.button if button.label == "Hoppa över").click().run()
+            self.assertEqual(len(tested_app.exception), 0)
+            self.assertNotIn("Hoppa över", [button.label for button in tested_app.button])
 
     def test_every_view_and_management_flow_runs_without_exceptions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
