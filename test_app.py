@@ -262,6 +262,8 @@ class LocalProfileTests(unittest.TestCase):
         self.assertEqual(set(gallery_modes), set(expected_modes.values()))
         self.assertIn("THREE.ACESFilmicToneMapping", demo_template)
         self.assertIn("updateMuscleHighlights", demo_template)
+        self.assertIn("abductionPadLeft", demo_template)
+        self.assertNotIn('config.mode === "hip_abduction") {\n            roller.scale', demo_template)
 
     def test_glute_program_migration_is_scoped_and_preserves_history(self):
         migration = (
