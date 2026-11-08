@@ -1209,6 +1209,9 @@
         } else if (shoulderModes.has(mode)) {
           setMarker(0, pose.shoulderLeft.clone(), [0.82, 0.82, 0.82]);
           setMarker(1, pose.shoulderRight.clone(), [0.82, 0.82, 0.82]);
+        } else if (["hip_thrust", "hip_abduction"].includes(mode)) {
+          setMarker(0, pose.hipLeft.clone().add(v(-0.08, 0.12, -0.18)), [0.9, 0.82, 0.68]);
+          setMarker(1, pose.hipRight.clone().add(v(0.08, 0.12, -0.18)), [0.9, 0.82, 0.68]);
         } else if (quadModes.has(mode)) {
           setMarker(0, pose.hipLeft.clone().lerp(pose.kneeLeft, 0.48).add(v(0, 0.02, 0.15)), [0.72, 1.45, 0.65]);
           setMarker(1, pose.hipRight.clone().lerp(pose.kneeRight, 0.48).add(v(0, 0.02, 0.15)), [0.72, 1.45, 0.65]);
