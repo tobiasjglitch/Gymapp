@@ -1,3 +1,4 @@
+import inspect
 import re
 import sqlite3
 import tempfile
@@ -13,6 +14,11 @@ import app
 
 
 class LocalProfileTests(unittest.TestCase):
+    def test_screen_wake_lock_reacquires_when_app_becomes_visible(self):
+        source = inspect.getsource(app.keep_screen_awake)
+        self.assertIn('navigator.wakeLock.request("screen")', source)
+        self.assertIn('document.addEventListener("visibilitychange"', source)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "gymapp.db"
@@ -226,9 +232,9 @@ class LocalProfileTests(unittest.TestCase):
             "Bröststödd roddmaskin": "chest_supported_machine_row",
             "Sidolyft hantlar": "lateral_raise",
             "Bröststödd high row": "chest_supported_high_row",
+            "Hip thrust-maskin/Smith": "hip_thrust",
             "Benpress": "leg_press",
             "Sittande lårcurl": "leg_curl",
-            "Benspark": "leg_extension",
             "Kabel-crunch": "cable_crunch",
             "Hantelpress plan bänk": "bench_press",
             "Bröstpressmaskin": "machine_chest_press",
@@ -237,7 +243,7 @@ class LocalProfileTests(unittest.TestCase):
             "Latsdrag, neutralt grepp": "neutral_grip_pulldown",
             "Sittande roddmaskin": "seated_machine_row",
             "Triceps pushdown": "triceps_pushdown",
-            "Vadpress i maskin": "machine_calf_raise",
+            "Höftabduktion i kabel/maskin": "hip_abduction",
         }
 
         for name, expected_mode in expected_modes.items():
@@ -256,6 +262,20 @@ class LocalProfileTests(unittest.TestCase):
         self.assertEqual(set(gallery_modes), set(expected_modes.values()))
         self.assertIn("THREE.ACESFilmicToneMapping", demo_template)
         self.assertIn("updateMuscleHighlights", demo_template)
+
+    def test_glute_program_migration_is_scoped_and_preserves_history(self):
+        migration = (
+            app.APP_DIR / "supabase_program_tobias_glutes_v8.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("p.name = 'Tobias'", migration)
+        self.assertIn("'Hip thrust-maskin/Smith'", migration)
+        self.assertIn("'Höftabduktion i kabel/maskin'", migration)
+        self.assertIn("e.name = 'Benspark'", migration)
+        self.assertIn("e.name = 'Vadpress i maskin'", migration)
+        self.assertNotRegex(migration.lower(), r"\bdelete\b")
+        self.assertNotRegex(migration.lower(), r"\b(update|insert into)\s+public\.workouts\b")
+        self.assertNotRegex(migration.lower(), r"\b(update|insert into)\s+public\.workout_sets\b")
 
     def test_brand_logo_asset_can_be_embedded(self):
         self.assertTrue(app.LOGO_PATH.is_file())

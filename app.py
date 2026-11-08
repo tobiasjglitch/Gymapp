@@ -64,7 +64,9 @@ TECHNIQUE_DEMOS = {
     "hanging leg raises": "hanging_leg_raise",
     "hantelpress plan bänk": "bench_press",
     "hip abduction": "hip_abduction",
+    "hip thrust-maskin/smith": "hip_thrust",
     "hip thrusts": "hip_thrust",
+    "höftabduktion i kabel/maskin": "hip_abduction",
     "hollow body holds": "hollow_hold",
     "hollow hold": "hollow_hold",
     "incl./preacher curls": "preacher_curl",
@@ -731,7 +733,7 @@ def best_for_exercise(name: str, history: pd.DataFrame) -> tuple[float, int] | N
 
 
 def default_weight_step(name: str) -> float:
-    barbell_lower = ["knäböj", "frontböj", "marklyft", "raka marklyft"]
+    barbell_lower = ["knäböj", "frontböj", "marklyft", "raka marklyft", "hip thrust"]
     return 5.0 if any(term in name.lower() for term in barbell_lower) else 2.5
 
 
@@ -1289,6 +1291,47 @@ def render_technique_dialog(exercise_name: str) -> None:
         unsafe_allow_html=True,
     )
     components.html(demo_html, height=460, scrolling=False)
+
+
+def keep_screen_awake() -> None:
+    components.html(
+        """
+        <!doctype html>
+        <html lang="sv">
+        <head><meta charset="utf-8"></head>
+        <body style="margin:0;overflow:hidden;background:transparent">
+        <script>
+        (() => {
+            let wakeLock = null;
+
+            async function acquireWakeLock() {
+                if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+                if (wakeLock && !wakeLock.released) return;
+                try {
+                    wakeLock = await navigator.wakeLock.request("screen");
+                    wakeLock.addEventListener("release", () => { wakeLock = null; });
+                } catch (error) {
+                    console.info("Lyftlogg could not keep the screen awake", error.name);
+                }
+            }
+
+            acquireWakeLock();
+            document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === "visible") acquireWakeLock();
+            });
+            try {
+                window.parent.document.addEventListener("pointerdown", acquireWakeLock, { passive: true });
+            } catch (error) {
+                document.addEventListener("pointerdown", acquireWakeLock, { passive: true });
+            }
+        })();
+        </script>
+        </body>
+        </html>
+        """,
+        height=0,
+        scrolling=False,
+    )
 
 
 def page_styles() -> None:
@@ -1875,6 +1918,7 @@ def render_export(profile: Profile) -> None:
 def main() -> None:
     st.set_page_config(page_title="Lyftlogg", page_icon=str(LOGO_PATH), layout="centered")
     page_styles()
+    keep_screen_awake()
     require_secure_configuration()
     init_db()
 

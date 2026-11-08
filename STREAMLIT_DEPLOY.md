@@ -13,6 +13,9 @@ Kör SQL-filerna i den här ordningen i Supabase SQL Editor:
 2. `supabase_migration_profiles_v3.sql`.
 3. `supabase_migration_start_values_v4.sql`.
 4. `supabase_migration_hardening_v5.sql`.
+5. `supabase_program_tobias_chest_v6.sql` för Tobias nuvarande grundprogram.
+6. `supabase_program_tobias_upper_body_v7.sql` för mer övre rygg och axlar.
+7. `supabase_program_tobias_glutes_v8.sql` för det nya sätesfokuset.
 
 V5 aktiverar RLS, stänger publik läsning av träningsdata, lägger till autosparade
 utkast och gör sparning av träningspass idempotent.
