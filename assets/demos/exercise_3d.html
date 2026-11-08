@@ -397,6 +397,10 @@
 
       let selectedPlate = null;
       let roller = null;
+      let abductionPadLeft = null;
+      let abductionPadRight = null;
+      let abductionArmLeft = null;
+      let abductionArmRight = null;
       let abWheel = null;
       let landmineBar = null;
       let machineArmLeft = null;
@@ -499,6 +503,22 @@
           leftRail.rotation.x = -0.2;
           rightRail.rotation.x = -0.2;
           equipment.add(footPlate, leftRail, rightRail);
+          return;
+        }
+        if (mode === "hip_abduction") {
+          const base = box(0.42, 0.18, 1.15, palette.machineInset);
+          base.position.set(0, -1.48, 0.92);
+          abductionPadLeft = box(0.18, 0.46, 0.38, palette.pad);
+          abductionPadRight = box(0.18, 0.46, 0.38, palette.pad);
+          abductionArmLeft = dynamicSegment(0.055, palette.accent);
+          abductionArmRight = dynamicSegment(0.055, palette.accent);
+          equipment.add(
+            base,
+            abductionPadLeft,
+            abductionPadRight,
+            abductionArmLeft.mesh,
+            abductionArmRight.mesh
+          );
           return;
         }
         const arm = cylinder(0.09, 1.2, palette.accent);
@@ -1029,8 +1049,8 @@
           } else {
             pose.kneeLeft = mix(v(-0.34, -0.72, 1.0), v(-0.92, -0.62, 0.9), progress);
             pose.kneeRight = mix(v(0.34, -0.72, 1.0), v(0.92, -0.62, 0.9), progress);
-            pose.ankleLeft = v(-0.36, -1.45, 1.08);
-            pose.ankleRight = v(0.36, -1.45, 1.08);
+            pose.ankleLeft = mix(v(-0.36, -1.45, 1.08), v(-0.68, -1.43, 1.02), progress);
+            pose.ankleRight = mix(v(0.36, -1.45, 1.08), v(0.68, -1.43, 1.02), progress);
           }
         } else if (["calf_raise", "machine_calf_raise"].includes(mode)) {
           const rise = progress * 0.22;
@@ -1294,9 +1314,28 @@
           } else if (config.mode === "leg_extension") {
             roller.position.y = -0.85 + progress * 0.35;
             roller.position.z = 1.35 + progress * 0.48;
-          } else if (config.mode === "hip_abduction") {
-            roller.scale.y = 1 + progress * 0.5;
           }
+        }
+
+        if (abductionPadLeft && abductionPadRight && abductionArmLeft && abductionArmRight) {
+          abductionPadLeft.position.set(
+            pose.kneeLeft.x - 0.13,
+            pose.kneeLeft.y + 0.13,
+            pose.kneeLeft.z - 0.03
+          );
+          abductionPadRight.position.set(
+            pose.kneeRight.x + 0.13,
+            pose.kneeRight.y + 0.13,
+            pose.kneeRight.z - 0.03
+          );
+          abductionArmLeft.update(
+            v(-0.12, -1.38, 0.73),
+            abductionPadLeft.position.clone().add(v(0, -0.18, 0))
+          );
+          abductionArmRight.update(
+            v(0.12, -1.38, 0.73),
+            abductionPadRight.position.clone().add(v(0, -0.18, 0))
+          );
         }
 
         if (abWheel) {
