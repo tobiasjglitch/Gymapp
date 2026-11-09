@@ -222,6 +222,39 @@ class LocalProfileTests(unittest.TestCase):
         )
         self.assertIn("#lat-pulldown-status[hidden]", legacy_demo)
 
+    def test_active_tobias_exercises_use_anatomical_gifs(self):
+        names = [
+            "Lutande hantelpress",
+            "Kabel-flyes",
+            "Bröststödd roddmaskin",
+            "Sidolyft hantlar",
+            "Bröststödd high row",
+            "Hip thrust-maskin/Smith",
+            "Benpress",
+            "Sittande lårcurl",
+            "Kabel-crunch",
+            "Hantelpress plan bänk",
+            "Enarms hantelrodd med stöd mot bänk",
+            "Cable cross",
+            "Latsdrag, neutralt grepp",
+            "Sittande roddmaskin",
+            "Triceps pushdown",
+            "Höftabduktion i kabel/maskin",
+        ]
+        expected_template = app.APP_DIR / "assets" / "demos" / "exercise_gif.html"
+
+        for name in names:
+            with self.subTest(name=name):
+                gif_path = app.technique_gif_path(name)
+                self.assertIsNotNone(gif_path)
+                self.assertGreater(gif_path.stat().st_size, 100_000)
+                self.assertEqual(app.technique_demo_path(name), expected_template)
+                html = app.technique_demo_html(name)
+                self.assertIsNotNone(html)
+                self.assertIn("data:image/gif;base64,", html)
+                self.assertNotIn("__DEMO_IMAGE__", html)
+                self.assertNotIn("__DEMO_CONFIG__", html)
+
     def test_mobility_library_uses_3d_modes_and_timer(self):
         expected_modes = {
             "dead_hang": "mobility_dead_hang",
@@ -252,9 +285,6 @@ class LocalProfileTests(unittest.TestCase):
                 self.assertIn('id="mobility-timer"', html)
 
     def test_tobias_active_program_uses_exact_technique_modes(self):
-        demo_template = (app.APP_DIR / "assets" / "demos" / "exercise_3d.html").read_text(
-            encoding="utf-8"
-        )
         expected_modes = {
             "Lutande hantelpress": "incline_press",
             "Kabel-flyes": "cable_fly",
@@ -266,9 +296,8 @@ class LocalProfileTests(unittest.TestCase):
             "Sittande lårcurl": "leg_curl",
             "Kabel-crunch": "cable_crunch",
             "Hantelpress plan bänk": "bench_press",
-            "Bröstpressmaskin": "machine_chest_press",
-            "Sidolyft i kabel": "cable_lateral_raise",
-            "Omvänd pec deck - bakre axlar": "reverse_pec_deck",
+            "Enarms hantelrodd med stöd mot bänk": "one_arm_row",
+            "Cable cross": "cable_fly",
             "Latsdrag, neutralt grepp": "neutral_grip_pulldown",
             "Sittande roddmaskin": "seated_machine_row",
             "Triceps pushdown": "triceps_pushdown",
@@ -281,18 +310,33 @@ class LocalProfileTests(unittest.TestCase):
                 html = app.technique_demo_html(name)
                 self.assertIsNotNone(html)
                 self.assertIn(f'"mode":"{expected_mode}"', html)
-                self.assertIn(f'"{expected_mode}"', demo_template)
 
         gallery = (app.APP_DIR / "prototypes" / "all_exercises_gallery.html").read_text(
             encoding="utf-8"
         )
         gallery_modes = re.findall(r'\["[^"]+", "([a-z_]+)"\]', gallery)
-        self.assertEqual(len(gallery_modes), 17)
+        self.assertEqual(len(gallery_modes), 15)
         self.assertEqual(set(gallery_modes), set(expected_modes.values()))
-        self.assertIn("THREE.ACESFilmicToneMapping", demo_template)
-        self.assertIn("updateMuscleHighlights", demo_template)
-        self.assertIn("abductionPadLeft", demo_template)
-        self.assertNotIn('config.mode === "hip_abduction") {\n            roller.scale', demo_template)
+        gif_template = (app.APP_DIR / "assets" / "demos" / "exercise_gif.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("#101714", gif_template)
+        self.assertIn("exercise-toggle", gif_template)
+
+    def test_free_weight_pass_three_migration_is_scoped_and_preserves_history(self):
+        migration = (
+            app.APP_DIR / "supabase_program_tobias_free_weights_v9.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("p.name = 'Tobias'", migration)
+        self.assertIn("pe.day_name = 'Pass 3'", migration)
+        self.assertIn("'Hantelpress plan bänk'", migration)
+        self.assertIn("'Enarms hantelrodd med stöd mot bänk'", migration)
+        self.assertIn("'Sidolyft hantlar'", migration)
+        self.assertIn("'Cable cross'", migration)
+        self.assertNotRegex(migration.lower(), r"\bdelete\b")
+        self.assertNotRegex(migration.lower(), r"\b(update|insert into)\s+public\.workouts\b")
+        self.assertNotRegex(migration.lower(), r"\b(update|insert into)\s+public\.workout_sets\b")
 
     def test_glute_program_migration_is_scoped_and_preserves_history(self):
         migration = (

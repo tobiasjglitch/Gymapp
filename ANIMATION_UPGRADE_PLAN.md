@@ -11,6 +11,10 @@ resumed from this file and `git log` in a later session.
 - [x] Bench/body intersection fixed in the shared rig
 - [x] Shared muscle-highlight system
 - [x] Desktop and mobile gallery layouts
+- [x] Anatomical 3D visual standard with dark-green baked background
+- [x] Muted coral muscle highlights and clean silhouettes without alpha halos
+- [x] 15 active Tobias modes exported as compact four-frame GIF loops
+- [x] Automatic GIF selection with legacy 3D fallback for other exercises
 
 ## Batch 1: Press and chest
 

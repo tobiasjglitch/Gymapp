@@ -45,12 +45,14 @@ TECHNIQUE_DEMOS = {
     "bröststödd roddmaskin": "chest_supported_machine_row",
     "bulgarian split squat": "split_squat",
     "cable chest press": "cable_press",
+    "cable cross": "cable_fly",
     "cable flyes": "cable_fly",
     "calf raises": "calf_raise",
     "chest supported rows": "chest_supported_row",
     "chin ups": "chinup",
     "db leg rdl": "rdl",
     "enarms hantelrodd": "one_arm_row",
+    "enarms hantelrodd med stöd mot bänk": "one_arm_row",
     "face pull": "face_pull",
     "face pulls": "face_pull",
     "farmers walk": "carry",
@@ -1290,10 +1292,20 @@ def technique_demo_mode(exercise_name: str) -> str | None:
     return None
 
 
-def technique_demo_path(exercise_name: str) -> Path | None:
-    if not technique_demo_mode(exercise_name):
+def technique_gif_path(exercise_name: str) -> Path | None:
+    mode = technique_demo_mode(exercise_name)
+    if not mode:
         return None
-    path = APP_DIR / "assets" / "demos" / "exercise_3d.html"
+    path = APP_DIR / "assets" / "demos" / "gifs" / f"{mode}.gif"
+    return path if path.exists() else None
+
+
+def technique_demo_path(exercise_name: str) -> Path | None:
+    mode = technique_demo_mode(exercise_name)
+    if not mode:
+        return None
+    template_name = "exercise_gif.html" if technique_gif_path(exercise_name) else "exercise_3d.html"
+    path = APP_DIR / "assets" / "demos" / template_name
     return path if path.exists() else None
 
 
@@ -1307,7 +1319,12 @@ def technique_demo_html(exercise_name: str) -> str | None:
         ensure_ascii=True,
         separators=(",", ":"),
     ).replace("</", "<\\/")
-    return path.read_text(encoding="utf-8").replace("__DEMO_CONFIG__", payload)
+    html = path.read_text(encoding="utf-8").replace("__DEMO_CONFIG__", payload)
+    gif_path = technique_gif_path(exercise_name)
+    if path.name == "exercise_gif.html" and gif_path:
+        encoded_gif = base64.b64encode(gif_path.read_bytes()).decode("ascii")
+        html = html.replace("__DEMO_IMAGE__", f"data:image/gif;base64,{encoded_gif}")
+    return html
 
 
 def mobility_for_exercise(exercise_name: str, index: int, total: int) -> str:
