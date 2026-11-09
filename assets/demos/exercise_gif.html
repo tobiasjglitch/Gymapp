@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      overflow: hidden;
+      background: #101714;
+      font-family: Inter, system-ui, sans-serif;
+    }
+    #exercise-demo {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: 440px;
+      place-items: center;
+      overflow: hidden;
+      background: #101714;
+    }
+    #exercise-image,
+    #exercise-frame {
+      display: block;
+      width: auto;
+      height: 100%;
+      max-width: 100%;
+      object-fit: contain;
+    }
+    #exercise-frame[hidden],
+    #exercise-image[hidden],
+    #exercise-status[hidden] { display: none; }
+    #exercise-status {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #cbd6d1;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    #exercise-toggle {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      display: grid;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 50%;
+      background: rgba(16, 23, 20, 0.82);
+      color: #f4f7f5;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+      font: 700 17px/1 system-ui, sans-serif;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+    }
+    #exercise-toggle:disabled { opacity: 0; }
+    #exercise-toggle:focus-visible {
+      outline: 3px solid rgba(184, 236, 82, 0.42);
+      outline-offset: 2px;
+    }
+    @media (max-width: 520px) {
+      #exercise-demo { height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="exercise-demo">
+    <div id="exercise-status" role="status">Laddar utförande...</div>
+    <img id="exercise-image" src="__DEMO_IMAGE__" alt="" hidden>
+    <canvas id="exercise-frame" width="543" height="724" hidden></canvas>
+    <button id="exercise-toggle" type="button" aria-label="Pausa animationen" disabled>Ⅱ</button>
+  </div>
+  <script>
+    (() => {
+      const config = __DEMO_CONFIG__;
+      const image = document.getElementById("exercise-image");
+      const frame = document.getElementById("exercise-frame");
+      const status = document.getElementById("exercise-status");
+      const toggle = document.getElementById("exercise-toggle");
+      const context = frame.getContext("2d");
+      let paused = false;
+
+      image.alt = `Animerat utförande: ${config.name}`;
+      image.addEventListener("load", () => {
+        status.hidden = true;
+        image.hidden = false;
+        toggle.disabled = false;
+      });
+      image.addEventListener("error", () => {
+        status.textContent = "Animationen kunde inte laddas.";
+      });
+      toggle.addEventListener("click", () => {
+        paused = !paused;
+        if (paused) {
+          context.clearRect(0, 0, frame.width, frame.height);
+          context.drawImage(image, 0, 0, frame.width, frame.height);
+          frame.hidden = false;
+          image.hidden = true;
+          toggle.textContent = "▶";
+          toggle.setAttribute("aria-label", "Fortsätt animationen");
+          return;
+        }
+        image.hidden = false;
+        frame.hidden = true;
+        toggle.textContent = "Ⅱ";
+        toggle.setAttribute("aria-label", "Pausa animationen");
+      });
+    })();
+  </script>
+</body>
+</html>
