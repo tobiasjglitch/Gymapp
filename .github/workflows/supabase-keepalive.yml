@@ -2,14 +2,16 @@ name: Supabase keepalive
 
 on:
   schedule:
-    - cron: "17 8 * * 1"
+    - cron: "43 5 * * *"
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Ping Supabase
+        continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -17,6 +19,7 @@ jobs:
           python - <<'PY'
           import os
           import sys
+          import time
           import urllib.error
           import urllib.request
 
@@ -33,26 +36,34 @@ jobs:
               print("SUPABASE_URL ska börja med https://")
               sys.exit(1)
 
-          request = urllib.request.Request(
-              f"{url}/rest/v1/rpc/keepalive",
-              data=b"{}",
-              method="POST",
-              headers={
-                  "apikey": key,
-                  "Authorization": f"Bearer {key}",
-                  "Content-Type": "application/json",
-              },
-          )
+          for attempt in range(1, 4):
+              request = urllib.request.Request(
+                  f"{url}/rest/v1/rpc/keepalive",
+                  data=b"{}",
+                  method="POST",
+                  headers={
+                      "apikey": key,
+                      "Authorization": f"Bearer {key}",
+                      "Content-Type": "application/json",
+                  },
+              )
 
-          try:
-              with urllib.request.urlopen(request, timeout=20) as response:
-                  print(f"Supabase svarade OK: HTTP {response.status}")
-                  print(response.read(200).decode("utf-8", "replace"))
-          except urllib.error.HTTPError as exc:
-              print(f"Supabase svarade med fel: HTTP {exc.code}")
-              print(exc.read(500).decode("utf-8", "replace"))
-              sys.exit(1)
-          except Exception as exc:
-              print(f"Kunde inte nå Supabase: {exc}")
-              sys.exit(1)
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      print(f"Supabase svarade OK: HTTP {response.status}")
+                      print(response.read(200).decode("utf-8", "replace"))
+                      sys.exit(0)
+              except urllib.error.HTTPError as exc:
+                  print(f"Forsok {attempt}/3: Supabase svarade med HTTP {exc.code}")
+                  print(exc.read(500).decode("utf-8", "replace"))
+                  if exc.code < 500:
+                      sys.exit(1)
+              except Exception as exc:
+                  print(f"Forsok {attempt}/3: Kunde inte na Supabase: {exc}")
+
+              if attempt < 3:
+                  time.sleep(15)
+
+          print("Supabase kunde inte nas efter tre forsok.")
+          sys.exit(1)
           PY
