@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1443,6 +1444,88 @@ def keep_screen_awake() -> None:
     )
 
 
+def workout_timer_key(profile_id: int, day_name: str) -> str:
+    return f"workout_started_at_{profile_id}_{day_name}"
+
+
+def workout_timer_html(started_at_ms: int) -> str:
+    return f"""
+    <!doctype html>
+    <html lang="sv">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <style>
+        * {{ box-sizing:border-box; }}
+        html,body {{ margin:0; background:transparent; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+        .timer {{
+          min-height:68px; display:flex; align-items:center; justify-content:space-between;
+          padding:10px 14px; border:1px solid #dce3de; border-radius:8px;
+          background:#111713; color:#f3f6f3;
+        }}
+        .timer span {{ display:block; color:#aeb9b2; font-size:11px; font-weight:800; letter-spacing:0; text-transform:uppercase; }}
+        .timer strong {{ display:block; margin-top:1px; color:#c7f36b; font-size:28px; line-height:1; font-variant-numeric:tabular-nums; }}
+        .pulse {{ width:9px; height:9px; border-radius:50%; background:#c7f36b; box-shadow:0 0 0 5px rgba(199,243,107,.12); }}
+      </style>
+    </head>
+    <body>
+      <div class="timer">
+        <div><span>Pågående pass</span><strong id="elapsed">00:00</strong></div>
+        <i class="pulse" aria-hidden="true"></i>
+      </div>
+      <script>
+        const startedAt = {int(started_at_ms)};
+        const output = document.getElementById("elapsed");
+        function tick() {{
+          const totalSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+          const hours = Math.floor(totalSeconds / 3600);
+          const minutes = Math.floor((totalSeconds % 3600) / 60);
+          const seconds = totalSeconds % 60;
+          output.textContent = hours > 0
+            ? `${{String(hours).padStart(2,"0")}}:${{String(minutes).padStart(2,"0")}}:${{String(seconds).padStart(2,"0")}}`
+            : `${{String(minutes).padStart(2,"0")}}:${{String(seconds).padStart(2,"0")}}`;
+        }}
+        tick();
+        setInterval(tick, 1000);
+      </script>
+    </body>
+    </html>
+    """
+
+
+def render_workout_timer(profile_id: int, day_name: str) -> None:
+    timer_key = workout_timer_key(profile_id, day_name)
+    started_at_ms = st.session_state.get(timer_key)
+
+    if started_at_ms is None:
+        if st.button(
+            "Starta pass",
+            key=f"start_workout_{profile_id}_{day_name}",
+            use_container_width=True,
+            type="primary",
+        ):
+            prefix = f"workout_started_at_{profile_id}_"
+            for state_key in list(st.session_state):
+                if str(state_key).startswith(prefix):
+                    st.session_state.pop(state_key, None)
+            st.session_state[timer_key] = int(time.time() * 1000)
+            st.rerun()
+        return
+
+    timer_col, reset_col = st.columns([5, 1], gap="small", vertical_alignment="center")
+    with timer_col:
+        components.html(workout_timer_html(int(started_at_ms)), height=68, scrolling=False)
+    with reset_col:
+        if st.button(
+            "↻",
+            key=f"reset_workout_timer_{profile_id}_{day_name}",
+            help="Nollställ passtimern",
+            use_container_width=True,
+        ):
+            st.session_state.pop(timer_key, None)
+            st.rerun()
+
+
 def page_styles() -> None:
     st.markdown(
         """
@@ -1665,6 +1748,8 @@ def render_today(profile: Profile) -> None:
     if draft_restored:
         st.info("Ditt påbörjade pass har återställts.")
 
+    render_workout_timer(profile.id, selected_day)
+
     logged: list[dict] = []
     draft_payload: list[dict] = []
     with st.expander("Datum och anteckning"):
@@ -1849,6 +1934,7 @@ def render_today(profile: Profile) -> None:
                     f"draft_loaded_{profile.id}_{selected_day}",
                     signature_key,
                     token_key,
+                    workout_timer_key(profile.id, selected_day),
                 ]
             )
             st.session_state[f"pending_workout_transition_{profile.id}"] = {

@@ -14,6 +14,16 @@ import app
 
 
 class LocalProfileTests(unittest.TestCase):
+    def test_workout_timer_is_scoped_and_updates_live(self):
+        self.assertEqual(app.workout_timer_key(7, "Pass 3"), "workout_started_at_7_Pass 3")
+
+        html = app.workout_timer_html(1_700_000_000_000)
+
+        self.assertIn("const startedAt = 1700000000000", html)
+        self.assertIn("Date.now() - startedAt", html)
+        self.assertIn("setInterval(tick, 1000)", html)
+        self.assertIn("Pågående pass", html)
+
     def test_screen_wake_lock_reacquires_when_app_becomes_visible(self):
         source = inspect.getsource(app.keep_screen_awake)
         self.assertIn('navigator.wakeLock.request("screen")', source)
@@ -459,6 +469,28 @@ app.main()
             with sqlite3.connect(db_path) as conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM workouts").fetchone()[0], 1)
                 self.assertGreater(conn.execute("SELECT COUNT(*) FROM workout_sets").fetchone()[0], 0)
+
+    def test_workout_timer_can_start_and_reset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "gymapp.db"
+            script = f"""
+from pathlib import Path
+import app
+
+app.DB_PATH = Path({str(db_path)!r})
+app.use_supabase = lambda: False
+app.clear_data_cache()
+app.main()
+"""
+            tested_app = AppTest.from_string(script, default_timeout=10).run()
+
+            next(button for button in tested_app.button if button.label == "Starta pass").click().run()
+            self.assertEqual(len(tested_app.exception), 0)
+            self.assertIn("↻", [button.label for button in tested_app.button])
+
+            next(button for button in tested_app.button if button.label == "↻").click().run()
+            self.assertEqual(len(tested_app.exception), 0)
+            self.assertIn("Starta pass", [button.label for button in tested_app.button])
 
     def test_completed_exercise_offers_optional_mobility_pause(self):
         with tempfile.TemporaryDirectory() as temp_dir:
