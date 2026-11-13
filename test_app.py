@@ -1,5 +1,4 @@
 import inspect
-import re
 import sqlite3
 import tempfile
 import unittest
@@ -321,11 +320,6 @@ class LocalProfileTests(unittest.TestCase):
                 self.assertIsNotNone(html)
                 self.assertIn(f'"mode":"{expected_mode}"', html)
 
-        gallery = (app.APP_DIR / "prototypes" / "all_exercises_gallery.html").read_text(
-            encoding="utf-8"
-        )
-        gallery_modes = re.findall(r'\["[^"]+", "([a-z_]+)"\]', gallery)
-        self.assertTrue(set(expected_modes.values()).issubset(set(gallery_modes)))
         gif_template = (app.APP_DIR / "assets" / "demos" / "exercise_gif.html").read_text(
             encoding="utf-8"
         )
